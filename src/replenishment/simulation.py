@@ -82,13 +82,15 @@ def simulate_replenishment(
     if lead_time < 0:
         raise ValueError("lead_time cannot be negative.")
 
-    demand_model = _normalize_demand(demand)
-    if not callable(demand):
-        demand_length = len(list(demand))
-        if periods > demand_length:
+    if callable(demand):
+        demand_model = demand
+    else:
+        demand = list(demand)  # materialize once; safe to re-list() a list below
+        if periods > len(demand):
             raise ValueError(
-                f"periods ({periods}) exceeds the length of the provided demand series ({demand_length})."
+                f"periods ({periods}) exceeds the length of the provided demand series ({len(demand)})."
             )
+        demand_model = _normalize_demand(demand)
     on_hand = initial_on_hand
     pipeline: list[int] = [0 for _ in range(lead_time)]
     snapshots: list[InventorySnapshot] = []

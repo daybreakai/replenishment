@@ -56,3 +56,16 @@ def test_simulate_replenishment_rejects_periods_exceeding_demand_length():
     policy = ReplenishmentPolicy.order_up_to(forecast=forecast, safety_stock=_null(), lead_time=0)
     with pytest.raises(ValueError):
         simulate_replenishment(periods=10, demand=[10] * 5, initial_on_hand=0, lead_time=0, policy=policy)
+
+
+def test_simulate_replenishment_accepts_a_one_shot_generator_for_demand():
+    forecast = TimeSeries.from_values([10] * 5)
+    policy = ReplenishmentPolicy.order_up_to(forecast=forecast, safety_stock=_null(), lead_time=0)
+
+    def demand_gen():
+        yield from [10, 10, 10, 10, 10]
+
+    result = simulate_replenishment(
+        periods=5, demand=demand_gen(), initial_on_hand=0, lead_time=0, policy=policy,
+    )
+    assert result.summary.total_demand == 50
