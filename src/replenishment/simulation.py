@@ -1,6 +1,12 @@
 """Day-by-day inventory simulation. Ported from janrth's simulation.py —
 unchanged except it now calls a single ReplenishmentPolicy type instead
-of any of 7 OrderingPolicy-protocol implementers."""
+of any of 7 OrderingPolicy-protocol implementers.
+
+Note: this is a lost-sales model, not a backorder model. Unmet demand in a
+period is recorded (via InventorySnapshot.backorders / SimulationSummary
+stockout accounting) but never carried forward into future on_hand or
+inventory_position — it is not backfilled once new stock arrives.
+"""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -77,6 +83,12 @@ def simulate_replenishment(
         raise ValueError("lead_time cannot be negative.")
 
     demand_model = _normalize_demand(demand)
+    if not callable(demand):
+        demand_length = len(list(demand))
+        if periods > demand_length:
+            raise ValueError(
+                f"periods ({periods}) exceeds the length of the provided demand series ({demand_length})."
+            )
     on_hand = initial_on_hand
     pipeline: list[int] = [0 for _ in range(lead_time)]
     snapshots: list[InventorySnapshot] = []
@@ -111,7 +123,7 @@ def simulate_replenishment(
         on_hand_total += on_hand
         snapshots.append(InventorySnapshot(
             period=period, starting_on_hand=on_hand + fulfilled, demand=period_demand,
-            received=received, ending_on_hand=on_hand, backorders=0,
+            received=received, ending_on_hand=on_hand, backorders=unmet,
             order_placed=order_qty, on_order=sum(pipeline),
         ))
 

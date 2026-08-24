@@ -40,3 +40,19 @@ def test_summary_reports_total_cost_as_sum_of_components():
     )
     s = result.summary
     assert abs(s.total_cost - (s.holding_cost + s.stockout_cost + s.ordering_cost)) < 1e-9
+
+
+def test_snapshot_backorders_reflects_unmet_demand():
+    forecast = TimeSeries.from_values([0] * 5)
+    policy = ReplenishmentPolicy.order_up_to(forecast=forecast, safety_stock=_null(), lead_time=0)
+    result = simulate_replenishment(
+        periods=5, demand=[10, 10, 10, 10, 10], initial_on_hand=0, lead_time=0, policy=policy,
+    )
+    assert all(snap.backorders == 10 for snap in result.snapshots)
+
+
+def test_simulate_replenishment_rejects_periods_exceeding_demand_length():
+    forecast = TimeSeries.from_values([10] * 5)
+    policy = ReplenishmentPolicy.order_up_to(forecast=forecast, safety_stock=_null(), lead_time=0)
+    with pytest.raises(ValueError):
+        simulate_replenishment(periods=10, demand=[10] * 5, initial_on_hand=0, lead_time=0, policy=policy)
