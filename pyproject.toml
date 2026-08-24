@@ -2,7 +2,7 @@
 name = "replenishment"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["pandas>=2.0"]
+dependencies = ["pandas>=2.0", "matplotlib>=3.7"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
