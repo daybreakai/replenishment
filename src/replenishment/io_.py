@@ -1083,6 +1083,19 @@ def build_lead_time_forecast_article_configs_from_standard_rows(
     return configs
 
 
+@dataclass(frozen=True)
+class _FrozenSafetyStock:
+    """A safety-stock strategy that always returns a precomputed value.
+    Used to carry a correctly-computed backtest-window safety-stock number
+    into an evaluation-window policy, without ever pairing that window's
+    forecast against a different window's actuals in one TimeSeries pair
+    (the bug this replaces)."""
+    value: float
+
+    def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
+        return self.value
+
+
 def optimize_point_forecast_policy_and_simulate_actuals(
     backtest_rows: Iterable[StandardSimulationRow],
     evaluation_rows: Iterable[StandardSimulationRow],
@@ -1159,12 +1172,22 @@ def optimize_point_forecast_policy_and_simulate_actuals(
         eval_starting_stock = eval_current_stock if use_current else eval_initial_on_hand
         eval_demand = [row.demand for row in eval_ordered]
         eval_forecast_values = [row.forecast for row in eval_ordered]
-        # Reuse the backtest actuals series for the evaluation policy's error
-        # calculation -- mirrors janrth's actuals_override=backtest_actuals
-        # behavior, since evaluation rows are typically forecast-only.
-        eval_policy = candidate_builder(
-            result.best_value, forecast_values=eval_forecast_values,
-            actuals_values=actuals_values,
+        # Compute the safety-stock buffer correctly from the backtest window
+        # (forecast and actuals genuinely aligned, same window, same indices),
+        # then carry that single number forward as a frozen constant for the
+        # eval simulation -- rather than pairing eval-window forecast against
+        # backtest-window actuals in one policy (which silently computed a
+        # meaningless residual between two different points in time).
+        backtest_policy = candidate_builder(result.best_value)
+        frozen_safety_stock_value = backtest_policy.safety_stock.compute(
+            forecast=backtest_policy.forecast, actuals=backtest_policy.actuals,
+            period=len(ordered), lead_time=lead_time, horizon=1,
+            service_level_factor=result.best_value,
+        )
+        eval_policy = ReplenishmentPolicy.order_up_to(
+            forecast=TimeSeries.from_values(eval_forecast_values),
+            safety_stock=_FrozenSafetyStock(value=frozen_safety_stock_value),
+            lead_time=lead_time,
         )
         simulation = simulate_replenishment(
             periods=len(eval_ordered),
