@@ -47,9 +47,19 @@ def test_k_mae_matches_janrth_formula_shape():
 
 def test_normal_quantile_matches_janrth_service_levels_normal_quantile():
     # Both implementations use the same Acklam coefficients -- confirms
-    # the port didn't introduce a transcription error.
-    for p in (0.85, 0.90, 0.95, 0.975, 0.99):
-        assert normal_quantile(p) > 0
+    # the port didn't introduce a transcription error. Checked against the
+    # textbook standard-normal quantiles (not just sign) for real parity
+    # coverage -- a "> 0" check alone would pass for almost any positive
+    # function and wouldn't catch a transcription bug in the coefficients.
+    expected = {
+        0.85: 1.0364,
+        0.90: 1.2816,
+        0.95: 1.6449,
+        0.975: 1.9600,
+        0.99: 2.3263,
+    }
+    for p, expected_value in expected.items():
+        assert abs(normal_quantile(p) - expected_value) < 1e-4
 
 
 def test_fill_rate_behavior_intentionally_differs_on_out_of_range_input():

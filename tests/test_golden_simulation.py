@@ -21,6 +21,7 @@ simulate_replenishment) instead of the unported optimizer, then apply the
 brief's fallback sanity bounds (total_cost > 0, fill_rate > 0.5) since
 there's no exact figure to target.
 """
+import pytest
 from replenishment.simulation import simulate_replenishment
 from replenishment.timeseries import TimeSeries
 from replenishment.strategies.safety_stock import SqrtHorizonSafetyStock
@@ -51,9 +52,14 @@ def test_golden_scenario_cost_within_tolerance_of_janrth_original():
         lead_time=SCENARIO_LEAD_TIME, policy=policy, holding_cost_per_unit=SCENARIO_HOLDING_COST,
         stockout_cost_per_unit=SCENARIO_STOCKOUT_COST, order_cost_per_order=0.0,
     )
-    # Sanity bounds -- the notebook never prints a total_cost/fill_rate to
-    # target exactly (see module docstring), so we fall back to the
-    # brief's ballpark checks: the simulation produces a positive cost and
-    # a reasonably-tuned policy doesn't stock out constantly.
-    assert result.summary.total_cost > 0
-    assert result.summary.fill_rate > 0.5
+    # The notebook never prints a total_cost/fill_rate to target exactly
+    # (see module docstring), but this scenario is fully deterministic --
+    # no random calls anywhere, demand is a fixed arithmetic sequence --
+    # so unlike a stochastic scenario we CAN pin an exact regression value
+    # once computed, rather than settling for loose sanity bounds. These
+    # were computed by running this exact test as originally written and
+    # observing the (stable, reproducible) result; if a future change to
+    # the ported engine's math legitimately alters this number, update the
+    # expected values here deliberately -- don't just loosen the tolerance.
+    assert result.summary.total_cost == pytest.approx(737.4, abs=1e-6)
+    assert result.summary.fill_rate == pytest.approx(0.9984709480122325, abs=1e-9)
