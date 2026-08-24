@@ -3,6 +3,7 @@ import pytest
 from replenishment.timeseries import TimeSeries
 from replenishment.strategies.safety_stock import (
     SqrtHorizonSafetyStock, KRmseSafetyStock, KMaeSafetyStock,
+    FillRateSafetyStock, SafetyStockRangeError,
 )
 
 
@@ -42,3 +43,45 @@ def test_safety_stock_zero_at_period_zero_no_history():
     strategy = SqrtHorizonSafetyStock(factor=1.65)
     ss = strategy.compute(forecast=FORECAST, actuals=ACTUALS, period=0, lead_time=0, horizon=1, service_level_factor=1.65)
     assert ss == 0.0
+
+
+def test_fill_rate_computes_positive_safety_stock_in_range():
+    strategy = FillRateSafetyStock(target_fill_rate=0.95)
+    ss = strategy.compute(forecast=FORECAST, actuals=ACTUALS, period=6, lead_time=0, horizon=1, service_level_factor=0.95)
+    assert ss > 0
+
+
+def test_fill_rate_zero_std_dev_returns_zero():
+    flat_forecast = TimeSeries.from_values([10, 10, 10])
+    flat_actuals = TimeSeries.from_values([10, 10, 10])
+    strategy = FillRateSafetyStock(target_fill_rate=0.95)
+    ss = strategy.compute(forecast=flat_forecast, actuals=flat_actuals, period=3, lead_time=0, horizon=1, service_level_factor=0.95)
+    assert ss == 0.0
+
+
+def test_fill_rate_raises_by_default_when_out_of_solvable_range():
+    # An essentially-impossible fill rate for this error distribution:
+    # loss_target computed will be so small inverse_normal_loss would
+    # need z beyond the +6sigma upper bound to satisfy it exactly.
+    # Verified via scratch script (see task-4-report.md): with FORECAST
+    # ([10]*6, extends to mean_demand=10) and this spike, loss_target
+    # ~= 1.44e-11 while normal_loss(upper_bound=6) ~= 1.56e-10, so
+    # loss_target < normal_loss(upper_bound) with a comfortable margin
+    # (an earlier, smaller spike of 500 landed within ~6% of the
+    # boundary -- too fragile to rely on).
+    tiny_error_actuals = TimeSeries.from_values([10] * 50 + [10, 5000])  # one huge miss
+    strategy = FillRateSafetyStock(target_fill_rate=0.999999999)
+    with pytest.raises(SafetyStockRangeError):
+        strategy.compute(forecast=FORECAST, actuals=tiny_error_actuals, period=52, lead_time=0, horizon=1, service_level_factor=0.999999999)
+
+
+def test_fill_rate_clip_mode_returns_boundary_instead_of_raising():
+    tiny_error_actuals = TimeSeries.from_values([10] * 50 + [10, 5000])
+    strategy = FillRateSafetyStock(target_fill_rate=0.999999999, on_out_of_range="clip")
+    ss = strategy.compute(forecast=FORECAST, actuals=tiny_error_actuals, period=52, lead_time=0, horizon=1, service_level_factor=0.999999999)
+    assert ss > 0  # did not raise; returned the clipped boundary value
+
+
+def test_fill_rate_rejects_target_outside_open_interval():
+    with pytest.raises(ValueError):
+        FillRateSafetyStock(target_fill_rate=1.0)
