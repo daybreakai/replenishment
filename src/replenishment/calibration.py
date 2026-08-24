@@ -64,13 +64,18 @@ def optimize(
             stockout_cost_per_unit=stockout_cost_per_unit, order_cost_per_order=order_cost_per_order,
         )
         # Carry ending on-hand from the search window into the validation
-        # window so the two runs form one continuous timeline.
+        # window so the two runs form one continuous timeline. period_offset
+        # ensures the validation policy reads forecast/actuals at the correct
+        # absolute period (search_periods onward), not restarting at 0 -- this
+        # is what makes validation scoring genuinely out-of-sample rather than
+        # silently re-scoring against the start of the forecast history.
         ending_on_hand = search_result.snapshots[-1].ending_on_hand if search_result.snapshots else initial_on_hand
         validation_policy = candidate_builder(value)
         validation_result = simulate_replenishment(
             periods=validation_periods, demand=validation_demand, initial_on_hand=ending_on_hand,
             lead_time=lead_time, policy=validation_policy, holding_cost_per_unit=holding_cost_per_unit,
             stockout_cost_per_unit=stockout_cost_per_unit, order_cost_per_order=order_cost_per_order,
+            period_offset=search_periods,
         )
         all_costs[value] = validation_result.summary.total_cost
 

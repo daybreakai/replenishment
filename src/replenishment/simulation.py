@@ -6,6 +6,14 @@ Note: this is a lost-sales model, not a backorder model. Unmet demand in a
 period is recorded (via InventorySnapshot.backorders / SimulationSummary
 stockout accounting) but never carried forward into future on_hand or
 inventory_position — it is not backfilled once new stock arrives.
+
+The period_offset parameter allows a simulation to run over a slice of a
+longer timeline while ensuring the policy's forecast/actuals read at the
+correct absolute position. For example, calibration.optimize uses it to
+make validation runs genuinely out-of-sample: search runs at offset=0,
+validation runs at offset=search_periods, so both access the policy's
+forecast/actuals at the right absolute indices rather than restarting
+from the beginning.
 """
 from __future__ import annotations
 
@@ -75,7 +83,7 @@ def simulate_replenishment(
     *, periods: int, demand: Iterable[int] | DemandModel, initial_on_hand: int,
     lead_time: int, policy, holding_cost_per_unit: float = 0.0,
     stockout_cost_per_unit: float = 0.0, order_cost_per_order: float = 0.0,
-    order_cost_per_unit: float = 0.0,
+    order_cost_per_unit: float = 0.0, period_offset: int = 0,
 ) -> SimulationResult:
     if periods <= 0:
         raise ValueError("periods must be positive.")
@@ -102,6 +110,7 @@ def simulate_replenishment(
     ordering_cost_total = 0.0
 
     for period in range(periods):
+        absolute_period = period + period_offset
         received = pipeline.pop(0) if lead_time > 0 else 0
         on_hand += received
         period_demand = demand_model(period)
@@ -112,7 +121,7 @@ def simulate_replenishment(
         unmet = period_demand - fulfilled
         total_backorders += unmet
 
-        state = InventoryState(period=period, on_hand=on_hand, on_order=sum(pipeline), backorders=0)
+        state = InventoryState(period=absolute_period, on_hand=on_hand, on_order=sum(pipeline), backorders=0)
         order_qty = max(0, policy.order_quantity_for(state))
         if order_qty > 0:
             ordering_cost_total += order_cost_per_order + (order_cost_per_unit * order_qty)
@@ -124,7 +133,7 @@ def simulate_replenishment(
         total_fulfilled += fulfilled
         on_hand_total += on_hand
         snapshots.append(InventorySnapshot(
-            period=period, starting_on_hand=on_hand + fulfilled, demand=period_demand,
+            period=absolute_period, starting_on_hand=on_hand + fulfilled, demand=period_demand,
             received=received, ending_on_hand=on_hand, backorders=unmet,
             order_placed=order_qty, on_order=sum(pipeline),
         ))
