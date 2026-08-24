@@ -203,6 +203,21 @@ def _safety_stock_builder_for_method(method: str | None, factor: float):
     return lambda: strategy_cls(factor=factor)
 
 
+def _guard_service_level_mode(mode_value: str | None) -> None:
+    """service_level_mode is accepted for signature compatibility, but this
+    repo's safety-stock strategies only ever compute a raw factor/z-value --
+    they never convert a named mode (e.g. "service_level") into that factor.
+    Silently accepting any other mode would mislabel output as if the
+    conversion happened. Raise instead of guessing."""
+    if mode_value not in (None, "factor"):
+        raise NotImplementedError(
+            f"service_level_mode={mode_value!r} is not implemented in this repo's "
+            "safety-stock strategies (they only support a raw factor/z-value). "
+            "Convert your target to a factor before calling, or pass "
+            "service_level_mode=None."
+        )
+
+
 def build_policy_from_standard_rows(
     rows, *, safety_stock_builder, trigger, lead_time: int,
     review_period: int = 1, forecast_horizon: int = 1,
@@ -782,6 +797,10 @@ def build_point_forecast_article_configs(
             raise TypeError(
                 "safety_stock_method must be a string or mapping of strings."
             )
+        mode_value = _resolve_optional_value(
+            service_level_mode, unique_id, "service_level_mode"
+        )
+        _guard_service_level_mode(mode_value)
         article_lead_time = _resolve_value(lead_time, unique_id, "lead_time")
         article_review_period = _resolve_optional_value(
             review_period, unique_id, "review_period"
@@ -962,6 +981,10 @@ def build_point_forecast_article_configs_from_standard_rows(
             raise TypeError(
                 "safety_stock_method must be a string or mapping of strings."
             )
+        mode_value = _resolve_optional_value(
+            service_level_mode, unique_id, "service_level_mode"
+        )
+        _guard_service_level_mode(mode_value)
         factor = _resolve_value(service_level_factor, unique_id, "service_level_factor")
         article_review_period = _resolve_optional_value(
             review_period, unique_id, "review_period"
@@ -1054,6 +1077,10 @@ def build_lead_time_forecast_article_configs_from_standard_rows(
             raise TypeError(
                 "safety_stock_method must be a string or mapping of strings."
             )
+        mode_value = _resolve_optional_value(
+            service_level_mode, unique_id, "service_level_mode"
+        )
+        _guard_service_level_mode(mode_value)
         factor = _resolve_value(service_level_factor, unique_id, "service_level_factor")
         article_review_period = _resolve_optional_value(
             review_period, unique_id, "review_period"
@@ -1117,6 +1144,7 @@ def optimize_point_forecast_policy_and_simulate_actuals(
     calibration.optimize already does a train/validation split that janrth's
     single-window optimizer lacked, so it's reused directly per article
     rather than re-implemented here."""
+    _guard_service_level_mode(service_level_mode)
     backtest_grouped = _group_standard_rows(backtest_rows)
     eval_grouped = _group_standard_rows(evaluation_rows)
     backtest_actuals = _actuals_by_article(backtest_rows)
