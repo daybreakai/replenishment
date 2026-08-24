@@ -7,10 +7,23 @@ from dataclasses import dataclass
 
 from replenishment.strategies.multiplier import MultiplierSafetyStockStrategy, NullSafetyStockStrategy
 from replenishment.strategies.order_trigger import OrderTrigger, OrderUpToTrigger, ReorderPointTrigger
-from replenishment.strategies.safety_stock import KMaeSafetyStock, KRmseSafetyStock
+from replenishment.strategies.safety_stock import (
+    FillRateSafetyStock, KMaeSafetyStock, KRmseSafetyStock, SqrtHorizonSafetyStock,
+)
 from replenishment.timeseries import TimeSeries
 
-_REQUIRES_ACTUALS = (KRmseSafetyStock, KMaeSafetyStock)
+_REQUIRES_ACTUALS = (SqrtHorizonSafetyStock, KRmseSafetyStock, KMaeSafetyStock, FillRateSafetyStock)
+
+
+def _requires_actuals(strategy) -> bool:
+    """True if `strategy` (or anything it wraps, recursively — e.g. a
+    DemandBufferDecorator) needs actuals to compute a safety stock."""
+    if isinstance(strategy, _REQUIRES_ACTUALS):
+        return True
+    wrapped = getattr(strategy, "wrapped", None)
+    if wrapped is not None:
+        return _requires_actuals(wrapped)
+    return False
 
 
 @dataclass(frozen=True)
@@ -30,7 +43,7 @@ class ReplenishmentPolicy:
             raise ValueError("review_period must be positive.")
         if self.forecast_horizon <= 0:
             raise ValueError("forecast_horizon must be positive.")
-        if isinstance(self.safety_stock, _REQUIRES_ACTUALS) and self.actuals is None:
+        if _requires_actuals(self.safety_stock) and self.actuals is None:
             raise ValueError(
                 f"{type(self.safety_stock).__name__} requires actuals to compute "
                 "forecast error; pass actuals=TimeSeries(...) or choose a "

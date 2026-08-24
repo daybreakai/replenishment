@@ -1,7 +1,8 @@
 import pytest
 from replenishment.timeseries import TimeSeries
-from replenishment.strategies.safety_stock import SqrtHorizonSafetyStock, KRmseSafetyStock
+from replenishment.strategies.safety_stock import FillRateSafetyStock, KRmseSafetyStock, SqrtHorizonSafetyStock
 from replenishment.strategies.multiplier import NullSafetyStockStrategy
+from replenishment.strategies.demand_buffer import DemandBufferDecorator
 from replenishment.strategies.order_trigger import OrderUpToTrigger, ReorderPointTrigger
 from replenishment.policy import ReplenishmentPolicy
 
@@ -59,5 +60,34 @@ def test_construction_rejects_rmse_strategy_without_actuals():
         ReplenishmentPolicy.order_up_to(
             forecast=FORECAST, actuals=None,
             safety_stock=KRmseSafetyStock(factor=1.65),
+            lead_time=0, forecast_horizon=1,
+        )
+
+
+def test_construction_rejects_sqrt_horizon_strategy_without_actuals():
+    with pytest.raises(ValueError, match="actuals"):
+        ReplenishmentPolicy.order_up_to(
+            forecast=FORECAST, actuals=None,
+            safety_stock=SqrtHorizonSafetyStock(factor=1.65),
+            lead_time=0, forecast_horizon=1,
+        )
+
+
+def test_construction_rejects_fill_rate_strategy_without_actuals():
+    with pytest.raises(ValueError, match="actuals"):
+        ReplenishmentPolicy.order_up_to(
+            forecast=FORECAST, actuals=None,
+            safety_stock=FillRateSafetyStock(target_fill_rate=0.95),
+            lead_time=0, forecast_horizon=1,
+        )
+
+
+def test_construction_rejects_decorated_strategy_without_actuals():
+    with pytest.raises(ValueError, match="actuals"):
+        ReplenishmentPolicy.order_up_to(
+            forecast=FORECAST, actuals=None,
+            safety_stock=DemandBufferDecorator(
+                wrapped=KRmseSafetyStock(factor=1.65), strength=0.5, reference=10.0,
+            ),
             lead_time=0, forecast_horizon=1,
         )
