@@ -207,8 +207,14 @@ def build_policy_from_standard_rows(
     rows, *, safety_stock_builder, trigger, lead_time: int,
     review_period: int = 1, forecast_horizon: int = 1,
 ) -> ReplenishmentPolicy:
-    """Shared ReplenishmentPolicy construction for every *_from_standard_rows
-    builder below -- replaces one bespoke construction per old policy type."""
+    """Shared ReplenishmentPolicy construction for a straightforward
+    standard-row build with untrimmed, matching-length forecast/actuals.
+
+    Not currently called by the builders below: the two eligible
+    *_from_standard_rows functions handle trimmed/overridden actuals series
+    that don't fit this helper's simple sort-and-zip contract (see
+    task-11-report.md). Provided as reusable infrastructure for callers with
+    plain matching-length rows -- exercised directly by test_io_.py."""
     forecast_values = [row.forecast for row in sorted(rows, key=lambda r: r.ds)]
     actual_values = [row.actuals for row in sorted(rows, key=lambda r: r.ds)]
     return ReplenishmentPolicy(
@@ -746,6 +752,12 @@ def build_point_forecast_article_configs(
     order_cost_per_order: Mapping[str, float] | float = 0.0,
     order_cost_per_unit: Mapping[str, float] | float = 0.0,
 ) -> dict[str, ArticleSimulationConfig]:
+    # service_level_mode/rmse_window are accepted for signature compatibility
+    # but not honored: safety_stock selection here only maps
+    # safety_stock_method to SqrtHorizonSafetyStock/KRmseSafetyStock/
+    # KMaeSafetyStock (Task 8), which always compute error from the full
+    # actuals-vs-forecast history with no fixed-window or fill-rate-mode
+    # option. See task-11-report.md concerns.
     grouped: dict[str, dict[int, PointForecastRow]] = defaultdict(dict)
     for row in rows:
         if row.period < 0:
@@ -1004,6 +1016,12 @@ def build_lead_time_forecast_article_configs_from_standard_rows(
     # -- SqrtHorizonSafetyStock (Task 8) already combines lead_time + horizon
     # this way internally, so no extra forecast_horizon adjustment is needed
     # here beyond passing lead_time and forecast_horizon straight through.
+    #
+    # service_level_mode/fixed_rmse/rmse_window are accepted for signature
+    # compatibility but not honored: SqrtHorizonSafetyStock/KRmseSafetyStock/
+    # KMaeSafetyStock (Task 8) always compute error from the full
+    # actuals-vs-forecast history, with no fixed-override, windowed-RMSE, or
+    # fill-rate-mode option. See task-11-report.md concerns.
     grouped = _group_standard_rows(rows)
     configs: dict[str, ArticleSimulationConfig] = {}
     for unique_id, ds_rows in grouped.items():
