@@ -14,6 +14,12 @@ make validation runs genuinely out-of-sample: search runs at offset=0,
 validation runs at offset=search_periods, so both access the policy's
 forecast/actuals at the right absolute indices rather than restarting
 from the beginning.
+
+Similarly, initial_pipeline/ending_pipeline let a caller run a simulation
+over a slice of a longer timeline while in-transit orders from the
+previous slice continue to arrive on schedule, rather than the pipeline
+restarting empty. Pass the previous run's ending_pipeline as this run's
+initial_pipeline to carry them forward.
 """
 from __future__ import annotations
 
@@ -64,6 +70,7 @@ class SimulationSummary:
 class SimulationResult:
     snapshots: list[InventorySnapshot]
     summary: SimulationSummary
+    ending_pipeline: list[int]
 
 
 def _normalize_demand(demand: Iterable[int] | DemandModel) -> DemandModel:
@@ -84,6 +91,7 @@ def simulate_replenishment(
     lead_time: int, policy, holding_cost_per_unit: float = 0.0,
     stockout_cost_per_unit: float = 0.0, order_cost_per_order: float = 0.0,
     order_cost_per_unit: float = 0.0, period_offset: int = 0,
+    initial_pipeline: list[int] | None = None,
 ) -> SimulationResult:
     if periods <= 0:
         raise ValueError("periods must be positive.")
@@ -100,7 +108,14 @@ def simulate_replenishment(
             )
         demand_model = _normalize_demand(demand)
     on_hand = initial_on_hand
-    pipeline: list[int] = [0 for _ in range(lead_time)]
+    if initial_pipeline is None:
+        pipeline: list[int] = [0 for _ in range(lead_time)]
+    else:
+        if len(initial_pipeline) != lead_time:
+            raise ValueError(
+                f"initial_pipeline must have length lead_time ({lead_time}), got {len(initial_pipeline)}."
+            )
+        pipeline = list(initial_pipeline)
     snapshots: list[InventorySnapshot] = []
 
     total_demand = 0
@@ -150,4 +165,4 @@ def simulate_replenishment(
         average_on_hand=average_on_hand, holding_cost=holding_cost,
         stockout_cost=stockout_cost, ordering_cost=ordering_cost_total, total_cost=total_cost,
     )
-    return SimulationResult(snapshots=snapshots, summary=summary)
+    return SimulationResult(snapshots=snapshots, summary=summary, ending_pipeline=list(pipeline))

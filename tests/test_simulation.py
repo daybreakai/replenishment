@@ -69,3 +69,27 @@ def test_simulate_replenishment_accepts_a_one_shot_generator_for_demand():
         periods=5, demand=demand_gen(), initial_on_hand=0, lead_time=0, policy=policy,
     )
     assert result.summary.total_demand == 50
+
+
+def test_initial_pipeline_carries_in_flight_orders_forward():
+    forecast = TimeSeries.from_values([10] * 10)
+    policy = ReplenishmentPolicy.order_up_to(forecast=forecast, safety_stock=_null(), lead_time=2)
+    # A simulation with in-flight orders already in the pipeline should
+    # receive them on schedule, not start as if nothing were ordered.
+    result = simulate_replenishment(
+        periods=2, demand=[0, 0], initial_on_hand=0, lead_time=2, policy=policy,
+        initial_pipeline=[5, 7],
+    )
+    # period 0 receives pipeline[0]=5, period 1 receives pipeline[1]=7
+    assert result.snapshots[0].received == 5
+    assert result.snapshots[1].received == 7
+
+
+def test_initial_pipeline_rejects_wrong_length():
+    forecast = TimeSeries.from_values([10] * 5)
+    policy = ReplenishmentPolicy.order_up_to(forecast=forecast, safety_stock=_null(), lead_time=2)
+    with pytest.raises(ValueError):
+        simulate_replenishment(
+            periods=2, demand=[0, 0], initial_on_hand=0, lead_time=2, policy=policy,
+            initial_pipeline=[5],  # wrong length -- should be 2
+        )

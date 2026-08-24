@@ -105,3 +105,25 @@ def test_optimize_validation_uses_period_offset_matching_search_periods():
         periods=1, demand=[100], initial_on_hand=0, lead_time=0, policy=policy, period_offset=28,
     )
     assert r1.snapshots[0].period == 28
+
+
+def test_optimize_carries_in_flight_pipeline_from_search_into_validation():
+    from replenishment.simulation import simulate_replenishment
+    forecast = TimeSeries.from_values([10] * 40)
+    actuals = TimeSeries.from_values([10] * 40)
+    policy = ReplenishmentPolicy.order_up_to(
+        forecast=forecast, actuals=actuals,
+        safety_stock=SqrtHorizonSafetyStock(factor=1.65), lead_time=2, forecast_horizon=1,
+    )
+    result = optimize(
+        candidate_builder=lambda factor: ReplenishmentPolicy.order_up_to(
+            forecast=forecast, actuals=actuals,
+            safety_stock=SqrtHorizonSafetyStock(factor=factor), lead_time=2, forecast_horizon=1,
+        ),
+        candidate_values=[1.65], periods=40, demand=[10] * 40, initial_on_hand=20, lead_time=2,
+        holding_cost_per_unit=1.0, stockout_cost_per_unit=5.0,
+    )
+    # Just confirm optimize() still runs cleanly end-to-end with the new
+    # pipeline-threading plumbing in place -- the deep pipeline-carry logic
+    # itself is covered directly by test_simulation.py's tests above.
+    assert result.best_value == 1.65

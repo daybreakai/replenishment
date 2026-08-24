@@ -63,8 +63,10 @@ def optimize(
             lead_time=lead_time, policy=policy, holding_cost_per_unit=holding_cost_per_unit,
             stockout_cost_per_unit=stockout_cost_per_unit, order_cost_per_order=order_cost_per_order,
         )
-        # Carry ending on-hand from the search window into the validation
-        # window so the two runs form one continuous timeline. period_offset
+        # Carry ending on-hand AND the in-flight order pipeline from the
+        # search window into the validation window so the two runs form one
+        # continuous timeline -- otherwise orders still in transit at the
+        # search/validation seam would be silently dropped. period_offset
         # ensures the validation policy reads forecast/actuals at the correct
         # absolute period (search_periods onward), not restarting at 0 -- this
         # is what makes validation scoring genuinely out-of-sample rather than
@@ -75,7 +77,7 @@ def optimize(
             periods=validation_periods, demand=validation_demand, initial_on_hand=ending_on_hand,
             lead_time=lead_time, policy=validation_policy, holding_cost_per_unit=holding_cost_per_unit,
             stockout_cost_per_unit=stockout_cost_per_unit, order_cost_per_order=order_cost_per_order,
-            period_offset=search_periods,
+            period_offset=search_periods, initial_pipeline=search_result.ending_pipeline,
         )
         all_costs[value] = validation_result.summary.total_cost
 
