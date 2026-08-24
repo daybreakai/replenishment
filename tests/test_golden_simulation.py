@@ -38,7 +38,7 @@ SCENARIO_BASE_DEMAND = [50 + (idx % 10) for idx in range(SCENARIO_PERIODS)]
 SCENARIO_FORECAST_MEAN = sum(SCENARIO_BASE_DEMAND) / len(SCENARIO_BASE_DEMAND)
 
 
-def test_golden_scenario_cost_within_tolerance_of_janrth_original():
+def test_golden_scenario_matches_pinned_regression_values():
     demand = SCENARIO_BASE_DEMAND
     forecast = TimeSeries.from_values([SCENARIO_FORECAST_MEAN] * SCENARIO_PERIODS)
     actuals = TimeSeries.from_values(demand)

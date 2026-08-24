@@ -77,8 +77,6 @@ def rmse(actuals: list[float], forecasts: list[float]) -> float:
     if count <= 0:
         return 0.0
     errors = [actuals[i] - forecasts[i] for i in range(count)]
-    if len(errors) == 1:
-        return abs(errors[0])
     return math.sqrt(statistics.fmean(e ** 2 for e in errors))
 
 
