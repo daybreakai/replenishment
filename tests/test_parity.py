@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from replenishment.math_ import normal_quantile, rmse, mae
+from replenishment.math_ import normal_quantile
 from replenishment.timeseries import TimeSeries
 from replenishment.strategies.safety_stock import SqrtHorizonSafetyStock, KRmseSafetyStock, KMaeSafetyStock
 
@@ -18,7 +18,9 @@ def test_sqrt_horizon_matches_janrth_formula_shape():
     strategy = SqrtHorizonSafetyStock(factor=factor)
     ours = strategy.compute(forecast=forecast, actuals=actuals, period=8, lead_time=1, horizon=1, service_level_factor=factor)
 
-    error = rmse([10, 12, 8, 11, 9, 10, 13, 7], [10] * 8)
+    # Hand-computed, not derived from this repo's own rmse() -- errors are
+    # [0, 2, -2, 1, -1, 0, 3, -3], RMSE = sqrt(28/8) = sqrt(3.5).
+    error = math.sqrt(3.5)
     janrth_equivalent = factor * error * math.sqrt(2)  # lead_time(1) + horizon(1)
     assert abs(ours - janrth_equivalent) < 1e-9
 
@@ -29,7 +31,7 @@ def test_k_rmse_matches_janrth_formula_shape():
     factor = 1.65
     strategy = KRmseSafetyStock(factor=factor)
     ours = strategy.compute(forecast=forecast, actuals=actuals, period=8, lead_time=1, horizon=1, service_level_factor=factor)
-    error = rmse([10, 12, 8, 11, 9, 10, 13, 7], [10] * 8)
+    error = math.sqrt(3.5)  # hand-computed, see above
     assert abs(ours - factor * error) < 1e-9
 
 
@@ -41,7 +43,7 @@ def test_k_mae_matches_janrth_formula_shape():
     factor = 1.65
     strategy = KMaeSafetyStock(factor=factor)
     ours = strategy.compute(forecast=forecast, actuals=actuals, period=8, lead_time=1, horizon=1, service_level_factor=factor)
-    error = mae([10, 12, 8, 11, 9, 10, 13, 7], [10] * 8)
+    error = 1.5  # hand-computed: (0+2+2+1+1+0+3+3)/8 = 12/8
     assert abs(ours - factor * error) < 1e-9
 
 
