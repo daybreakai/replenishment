@@ -29,6 +29,29 @@ def test_roundtrip_through_dataframe():
     assert len(roundtripped) == len(rows)
 
 
+def test_article_config_builders_accept_per_item_moq():
+    from replenishment.io_ import (
+        build_lead_time_forecast_article_configs_from_standard_rows,
+        build_point_forecast_article_configs_from_standard_rows,
+    )
+    rows = generate_standard_simulation_rows(
+        n_unique_ids=2, periods=20, history_mean=10, history_std=2,
+        forecast_mean=10, forecast_std=1, holding_cost_per_unit=1,
+        stockout_cost_per_unit=5, order_cost_per_order=2, lead_time=1, seed=7,
+    )
+    moqs = {"A": 30, "B": 12}
+    point = build_point_forecast_article_configs_from_standard_rows(
+        rows, service_level_factor=1.65, safety_stock_method="sqrt_horizon", moq=moqs,
+    )
+    import pytest
+    with pytest.warns(DeprecationWarning):
+        lead = build_lead_time_forecast_article_configs_from_standard_rows(
+            rows, service_level_factor=1.65, safety_stock_method="sqrt_horizon", moq=moqs,
+        )
+    assert point["A"].policy.moq == 30 and point["B"].policy.moq == 12
+    assert lead["A"].policy.moq == 30 and lead["B"].policy.moq == 12
+
+
 def test_build_policy_from_standard_rows_returns_a_working_policy():
     rows = generate_standard_simulation_rows(
         n_unique_ids=1, periods=20, history_mean=10, history_std=2,
