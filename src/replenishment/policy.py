@@ -35,10 +35,13 @@ class ReplenishmentPolicy:
     lead_time: int = 0
     review_period: int = 1
     forecast_horizon: int = 1
+    moq: int = 1  # order multiple (pack size): rounds any positive order up to a multiple, never creates one
 
     def __post_init__(self) -> None:
         if self.lead_time < 0:
             raise ValueError("lead_time cannot be negative.")
+        if self.moq < 1:
+            raise ValueError("moq must be at least 1.")
         if self.review_period <= 0:
             raise ValueError("review_period must be positive.")
         if self.forecast_horizon <= 0:
@@ -55,22 +58,31 @@ class ReplenishmentPolicy:
             forecast=self.forecast, actuals=self.actuals, period=state.period,
             lead_time=self.lead_time, horizon=self.forecast_horizon, service_level_factor=1.0,
         )
-        return self.trigger.order_quantity(
+        qty = self.trigger.order_quantity(
             inventory_position=state.inventory_position, period=state.period,
             review_period=self.review_period, forecast=self.forecast,
             safety_stock=safety_stock, lead_time=self.lead_time, forecast_horizon=self.forecast_horizon,
         )
+        # MoQ rounds a positive order UP to the nearest multiple of moq
+        # (pack-size semantics: "must buy 12" means 12, 24, 36 — not 13).
+        # A "don't order" decision (review-period gating, position at/above
+        # target) is never turned into an order.
+        if qty > 0:
+            return ((qty + self.moq - 1) // self.moq) * self.moq
+        return qty
 
     @classmethod
     def order_up_to(cls, *, forecast: TimeSeries, safety_stock, actuals: TimeSeries | None = None,
-                     lead_time: int = 0, review_period: int = 1, forecast_horizon: int = 1) -> "ReplenishmentPolicy":
+                     lead_time: int = 0, review_period: int = 1, forecast_horizon: int = 1,
+                     moq: int = 1) -> "ReplenishmentPolicy":
         return cls(forecast=forecast, actuals=actuals, safety_stock=safety_stock,
                     trigger=OrderUpToTrigger(), lead_time=lead_time,
-                    review_period=review_period, forecast_horizon=forecast_horizon)
+                    review_period=review_period, forecast_horizon=forecast_horizon, moq=moq)
 
     @classmethod
     def reorder_point(cls, *, forecast: TimeSeries, safety_stock, actuals: TimeSeries | None = None,
-                       lead_time: int = 0, review_period: int = 1, forecast_horizon: int = 1) -> "ReplenishmentPolicy":
+                       lead_time: int = 0, review_period: int = 1, forecast_horizon: int = 1,
+                       moq: int = 1) -> "ReplenishmentPolicy":
         return cls(forecast=forecast, actuals=actuals, safety_stock=safety_stock,
                     trigger=ReorderPointTrigger(), lead_time=lead_time,
-                    review_period=review_period, forecast_horizon=forecast_horizon)
+                    review_period=review_period, forecast_horizon=forecast_horizon, moq=moq)
