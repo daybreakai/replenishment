@@ -65,6 +65,11 @@ class SimulationSummary:
     ordering_cost: float
     total_cost: float
 
+    @property
+    def avg_on_hand(self) -> float:
+        """Alias for average_on_hand."""
+        return self.average_on_hand
+
 
 @dataclass(frozen=True)
 class SimulationResult:

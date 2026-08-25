@@ -14,6 +14,18 @@ from replenishment.math_ import rmse as _rmse, mae as _mae, normal_loss, inverse
 from replenishment.timeseries import TimeSeries
 
 
+def _resolve_factor(cls_name: str, factor, k) -> float:
+    """factor=/k= alias resolution shared by the flat-multiplier strategies,
+    with an error message pointing at the right name instead of a bare
+    'unexpected keyword argument'."""
+    if factor is not None and k is not None:
+        raise TypeError(f"{cls_name} accepts either factor= or k=, not both.")
+    resolved = factor if factor is not None else k
+    if resolved is None:
+        raise TypeError(f"{cls_name} requires factor= (k= also accepted).")
+    return resolved
+
+
 class SafetyStockStrategy(Protocol):
     def compute(
         self,
@@ -48,6 +60,9 @@ class SqrtHorizonSafetyStock:
 
     factor: float
 
+    def __init__(self, factor: float | None = None, *, k: float | None = None) -> None:
+        object.__setattr__(self, "factor", _resolve_factor("SqrtHorizonSafetyStock", factor, k))
+
     def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
         actuals = _require_actuals(actuals)
         actual_values, forecast_values = _error_series(forecast, actuals, period)
@@ -63,6 +78,9 @@ class KRmseSafetyStock:
 
     factor: float
 
+    def __init__(self, factor: float | None = None, *, k: float | None = None) -> None:
+        object.__setattr__(self, "factor", _resolve_factor("KRmseSafetyStock", factor, k))
+
     def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
         actuals = _require_actuals(actuals)
         actual_values, forecast_values = _error_series(forecast, actuals, period)
@@ -74,6 +92,9 @@ class KMaeSafetyStock:
     """SS = factor * MAE, flat, no horizon scaling."""
 
     factor: float
+
+    def __init__(self, factor: float | None = None, *, k: float | None = None) -> None:
+        object.__setattr__(self, "factor", _resolve_factor("KMaeSafetyStock", factor, k))
 
     def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
         actuals = _require_actuals(actuals)

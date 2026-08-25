@@ -11,9 +11,21 @@ class TimeSeries:
     _values: list[float] | None = field(default=None, repr=False)
     _model: Callable[[int], float] | None = field(default=None, repr=False)
 
+    def __init__(self, _values=None, _model=None, *, values=None, model=None) -> None:
+        # values=/model= are the public spelling; TimeSeries.from_values/from_callable
+        # remain the recommended constructors, this just makes TimeSeries(values=[...])
+        # work instead of raising "unexpected keyword argument 'values'".
+        object.__setattr__(self, "_values", _values if _values is not None else values)
+        object.__setattr__(self, "_model", _model if _model is not None else model)
+        self.__post_init__()
+
     def __post_init__(self) -> None:
         if (self._values is None) == (self._model is None):
-            raise ValueError("TimeSeries requires exactly one of values or model.")
+            raise ValueError(
+                "TimeSeries requires exactly one of values or model "
+                "(use TimeSeries.from_values([...]) or TimeSeries.from_callable(fn), "
+                "or TimeSeries(values=[...]) / TimeSeries(model=fn))."
+            )
 
     @classmethod
     def from_values(cls, values: list[float]) -> "TimeSeries":
