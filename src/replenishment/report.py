@@ -81,19 +81,23 @@ class ReplenishmentReport(BaseModel):
         return "\n".join(lines)
 
 
-def _health_status(fill_rate: float, total_demand: int) -> HealthStatus:
+def _health_status(fill_rate: float, total_demand: int, understock_fill_rate_threshold: float) -> HealthStatus:
     if total_demand == 0:
         return "No Data"
-    if fill_rate < UNDERSTOCK_FILL_RATE_THRESHOLD:
+    if fill_rate < understock_fill_rate_threshold:
         return "Understock Risk"
     return "Healthy"
 
 
-def build_report(entries: list[PolicyRun]) -> ReplenishmentReport:
+def build_report(
+    entries: list[PolicyRun],
+    *,
+    understock_fill_rate_threshold: float = UNDERSTOCK_FILL_RATE_THRESHOLD,
+) -> ReplenishmentReport:
     records: list[PolicyHealth] = []
     for entry in entries:
         summary = entry.result.summary
-        status = _health_status(summary.fill_rate, summary.total_demand)
+        status = _health_status(summary.fill_rate, summary.total_demand, understock_fill_rate_threshold)
         records.append(PolicyHealth(
             label=entry.label,
             fill_rate=summary.fill_rate,

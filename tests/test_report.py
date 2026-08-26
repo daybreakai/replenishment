@@ -1,6 +1,6 @@
 from replenishment.report import PolicyRun, build_report
 from replenishment.strategies.resolver import resolve_safety_stock_strategy
-from replenishment.simulation import InventorySnapshot, SimulationResult, SimulationSummary
+from replenishment.simulation import SimulationResult, SimulationSummary
 
 
 def _result(fill_rate: float, total_demand: int = 100) -> SimulationResult:
@@ -77,3 +77,17 @@ def test_policy_runs_from_portfolio_zips_results_with_resolved_strategies():
     assert by_label["sku-b"].resolved_safety_stock is resolved_b
     report = build_report(runs)
     assert {r.label for r in report.records} == {"sku-a", "sku-b"}
+
+
+def test_build_report_boundary_fill_rate_90_percent_is_healthy():
+    resolved = resolve_safety_stock_strategy(has_actuals=True, periods_observed=10, factor=1.65)
+    entry = PolicyRun(label="sku-boundary", result=_result(fill_rate=0.90), resolved_safety_stock=resolved)
+    report = build_report([entry])
+    assert report.records[0].health_status == "Healthy"
+
+
+def test_build_report_understock_threshold_is_overridable():
+    resolved = resolve_safety_stock_strategy(has_actuals=True, periods_observed=10, factor=1.65)
+    entry = PolicyRun(label="sku-override", result=_result(fill_rate=0.95), resolved_safety_stock=resolved)
+    report = build_report([entry], understock_fill_rate_threshold=0.99)
+    assert report.records[0].health_status == "Understock Risk"
