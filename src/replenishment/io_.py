@@ -1075,19 +1075,6 @@ def build_lead_time_forecast_article_configs_from_standard_rows(
     )
 
 
-@dataclass(frozen=True)
-class _FrozenSafetyStock:
-    """A safety-stock strategy that always returns a precomputed value.
-    Used to carry a correctly-computed backtest-window safety-stock number
-    into an evaluation-window policy, without ever pairing that window's
-    forecast against a different window's actuals in one TimeSeries pair
-    (the bug this replaces)."""
-    value: float
-
-    def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
-        return self.value
-
-
 def optimize_point_forecast_policy_and_simulate_actuals(
     backtest_rows: Iterable[StandardSimulationRow],
     evaluation_rows: Iterable[StandardSimulationRow],
@@ -1179,7 +1166,7 @@ def optimize_point_forecast_policy_and_simulate_actuals(
         )
         eval_policy = ReplenishmentPolicy.order_up_to(
             forecast=TimeSeries.from_values(eval_forecast_values),
-            safety_stock=_FrozenSafetyStock(value=frozen_safety_stock_value),
+            safety_stock=NullSafetyStockStrategy(value=frozen_safety_stock_value),
             lead_time=lead_time,
         )
         simulation = simulate_replenishment(
@@ -1295,20 +1282,10 @@ def split_standard_simulation_rows(
 
 
 def _resolve_value(
-    value: Mapping[str, int | float] | int | float, unique_id: str, name: str
-) -> int | float:
-    if isinstance(value, Mapping):
-        if unique_id not in value:
-            raise ValueError(f"Missing {name} for unique_id '{unique_id}'.")
-        return value[unique_id]
-    return value
-
-
-def _resolve_optional_value(
-    value: Mapping[str, int | float | str] | int | float | str | None,
-    unique_id: str,
-    name: str,
+    value: Mapping[str, int | float | str] | int | float | str | None, unique_id: str, name: str
 ) -> int | float | str | None:
+    """Resolve a per-unique_id knob: a {unique_id: value} mapping, a flat
+    scalar applied to every unique_id, or None (passed through)."""
     if value is None:
         return None
     if isinstance(value, Mapping):
@@ -1316,6 +1293,12 @@ def _resolve_optional_value(
             raise ValueError(f"Missing {name} for unique_id '{unique_id}'.")
         return value[unique_id]
     return value
+
+
+# _resolve_value already returns None unchanged; kept as a separate name at
+# call sites where "value" is never optional, so a caller passing None gets
+# a normal-looking None result instead of a signature suggesting it can't happen.
+_resolve_optional_value = _resolve_value
 
 
 def _validate_periods(unique_id: str, period_rows: Mapping[int, object]) -> int:

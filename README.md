@@ -100,9 +100,21 @@ plotting, and a stress test.
 ## Package layout
 
 - `policy.py` — `ReplenishmentPolicy`, the unified policy class
+- `portfolio.py` — `Portfolio`/`PortfolioResult`, the multi-item front door
+- `report.py` — typed pydantic report layer: `build_report()`,
+  `policy_runs_from_portfolio()`
+- `classification.py` — `classify_demand()`, Syntetos-Boylan demand-shape router
+  (smooth / erratic / intermittent / lumpy)
 - `strategies/safety_stock.py` — `SqrtHorizonSafetyStock`, `KRmseSafetyStock`,
-  `KMaeSafetyStock`, `FillRateSafetyStock`
-- `strategies/order_trigger.py` — `OrderUpToTrigger`, `ReorderPointTrigger`
+  `KMaeSafetyStock`, `FillRateSafetyStock`, `FixedErrorSafetyStock`
+- `strategies/distributional_safety_stock.py` — `KingsFormulaSafetyStock`,
+  `CompoundPoissonSafetyStock`
+- `strategies/multiplier.py` — `MultiplierSafetyStockStrategy`,
+  `NullSafetyStockStrategy`
+- `strategies/resolver.py` — `resolve_safety_stock_strategy()`, picks a
+  safety-stock strategy from data availability instead of demand shape
+- `strategies/order_trigger.py` — `OrderUpToTrigger`,
+  `FlatForecastOrderUpToTrigger`, `ReorderPointTrigger`
 - `strategies/demand_buffer.py` — trend-chasing demand-buffer decorator
 - `simulation.py` — `simulate_replenishment`, day-by-day lost-sales simulator
 - `calibration.py` — grid-search calibration with train/validation split
