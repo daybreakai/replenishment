@@ -107,6 +107,10 @@ plotting, and a stress test.
 - `simulation.py` — `simulate_replenishment`, day-by-day lost-sales simulator
 - `calibration.py` — grid-search calibration with train/validation split
 - `io_.py` — data loaders and policy-construction helpers
+- `segmentation.py` (pluggable `SegmentRule`s: ABC, XYZ, demand-pattern,
+  attribute-tag, explicit group, composed into one `SegmentKey` per item)
+- `segment_policy.py` (`SegmentPolicyMap`: segment id to policy knobs,
+  YAML-loadable default plus a mergeable runtime override map)
 - `viz.py` — plotting
 - `timeseries.py` — `TimeSeries`, the shared forecast/actuals abstraction
 

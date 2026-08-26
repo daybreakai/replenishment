@@ -1,6 +1,6 @@
 import pytest
 
-from replenishment.classification import classify_demand
+from replenishment.classification import classify_abc, classify_demand, classify_xyz
 
 
 def test_empty_history_is_smooth():
@@ -36,3 +36,37 @@ def test_lumpy_high_adi_high_cv2():
 def test_single_nonzero_event_is_very_intermittent():
     history = [0] * 20 + [10]
     assert classify_demand(history) in ("intermittent", "lumpy")
+
+
+def test_classify_abc_splits_by_cumulative_share():
+    # one item is 80% of total value -> A alone; next two share the rest.
+    values = {"big": 80.0, "mid": 15.0, "small": 5.0}
+    result = classify_abc(values)
+    assert result["big"] == "A"
+    assert result["mid"] == "B"
+    assert result["small"] == "C"
+
+
+def test_classify_abc_all_zero_is_c():
+    values = {"a": 0.0, "b": 0.0}
+    assert classify_abc(values) == {"a": "C", "b": "C"}
+
+
+def test_classify_abc_rejects_bad_cutoffs():
+    with pytest.raises(ValueError):
+        classify_abc({"a": 1.0}, cutoffs=(0.95, 0.8))
+    with pytest.raises(ValueError):
+        classify_abc({"a": -1.0})
+
+
+def test_classify_xyz_buckets():
+    assert classify_xyz(0.1) == "X"
+    assert classify_xyz(0.7) == "Y"
+    assert classify_xyz(1.5) == "Z"
+
+
+def test_classify_xyz_rejects_bad_thresholds():
+    with pytest.raises(ValueError):
+        classify_xyz(0.5, thresholds=(1.0, 0.5))
+    with pytest.raises(ValueError):
+        classify_xyz(-0.1)

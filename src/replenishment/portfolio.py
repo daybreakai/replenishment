@@ -14,7 +14,7 @@ same as the underlying builder.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from replenishment.io_ import (
@@ -23,6 +23,8 @@ from replenishment.io_ import (
     build_point_forecast_article_configs_from_standard_rows,
     standard_simulation_rows_from_dataframe,
 )
+from replenishment.segment_policy import SegmentPolicyMap
+from replenishment.segmentation import SegmentContext, SegmentKey, SegmentRule, segment_portfolio
 from replenishment.simulation import SimulationResult, SimulationSummary
 
 
@@ -164,3 +166,44 @@ class Portfolio:
         return PortfolioResult(
             {uid: cfg.simulate() for uid, cfg in self.configs(**knobs).items()}
         )
+
+    def segment(
+        self,
+        rules: Sequence[SegmentRule],
+        context: SegmentContext | None = None,
+    ) -> dict[str, SegmentKey]:
+        """Assign every item a composite SegmentKey via segment_portfolio.
+        Segmentation, not policy: run this first, then feed the ids into
+        simulate_by_segment via a SegmentPolicyMap."""
+        return segment_portfolio(self._rows, rules, context)
+
+    def simulate_by_segment(
+        self,
+        rules: Sequence[SegmentRule],
+        policy_map: SegmentPolicyMap,
+        *,
+        context: SegmentContext | None = None,
+        overrides: SegmentPolicyMap | None = None,
+    ) -> PortfolioResult:
+        """Segment every item, resolve each segment's knobs from policy_map
+        (overrides merged on top first, runtime wins field-by-field), and
+        simulate each segment as its own sub-portfolio. mode/method/etc can
+        differ per segment this way; configs() itself only takes one mode
+        per call, so segments can't be mixed into a single simulate()."""
+        keys = self.segment(rules, context=context)
+        effective_policy = policy_map.merge(overrides) if overrides is not None else policy_map
+
+        rows_by_segment: dict[str, list[StandardSimulationRow]] = {}
+        for row in self._rows:
+            rows_by_segment.setdefault(keys[row.unique_id].id, []).append(row)
+
+        results: dict[str, SimulationResult] = {}
+        for segment_id, segment_rows in rows_by_segment.items():
+            knobs = effective_policy.resolve(segment_id)
+            if "factor" not in knobs:
+                raise ValueError(
+                    f"Segment '{segment_id}' has no resolvable factor. Set "
+                    "policy_map.default.factor or add an entry for this segment."
+                )
+            results.update(Portfolio(segment_rows).simulate(**knobs).results)
+        return PortfolioResult(results)
