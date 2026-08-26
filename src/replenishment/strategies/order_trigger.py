@@ -29,6 +29,29 @@ class OrderUpToTrigger:
 
 
 @dataclass(frozen=True)
+class FlatForecastOrderUpToTrigger:
+    """Order-up-to with a FLAT forecast target: order_up_to =
+    forecast[period + 1] * forecast_horizon + safety_stock.
+
+    Exists because OrderUpToTrigger sums forecast[period+1 .. period+horizon],
+    which is only leak-free when the forecast series is a true forward
+    forecast fixed at one origin. In backtest calibration the series is
+    usually rolling one-step-ahead cross-validation values, where entry
+    period+k (k > 1) was produced at origin period+k-1 -- AFTER the order
+    decision at `period`. Summing them leaks future demand into the target,
+    and the leak grows with model reactivity (a naive forecast becomes a
+    near-oracle). This trigger uses only forecast[period + 1] -- the freshest
+    value available at decision time -- times the horizon: the classic
+    order-up-to arithmetic (forecast_t * cover)."""
+
+    def order_quantity(self, *, inventory_position, period, review_period, forecast, safety_stock, lead_time, forecast_horizon) -> int:
+        if review_period > 1 and period % review_period != 0:
+            return 0
+        target = forecast.value_at(period + 1) * forecast_horizon + safety_stock
+        return max(0, math.ceil(target - inventory_position))
+
+
+@dataclass(frozen=True)
 class ReorderPointTrigger:
     def order_quantity(self, *, inventory_position, period, review_period, forecast, safety_stock, lead_time, forecast_horizon) -> int:
         if review_period > 1 and period % review_period != 0:

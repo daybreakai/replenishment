@@ -85,3 +85,24 @@ def test_fill_rate_clip_mode_returns_boundary_instead_of_raising():
 def test_fill_rate_rejects_target_outside_open_interval():
     with pytest.raises(ValueError):
         FillRateSafetyStock(target_fill_rate=1.0)
+
+
+def test_fixed_error_flat_is_factor_times_error_regardless_of_history():
+    from replenishment.strategies.safety_stock import FixedErrorSafetyStock
+    strategy = FixedErrorSafetyStock(error=4.0, factor=1.5)
+    # no actuals needed, period 0 fine -- the whole point is pre-window error
+    ss = strategy.compute(forecast=FORECAST, actuals=None, period=0, lead_time=1, horizon=1, service_level_factor=1.5)
+    assert ss == 6.0
+
+
+def test_fixed_error_scaled_matches_sqrt_horizon_shape():
+    from replenishment.strategies.safety_stock import FixedErrorSafetyStock
+    strategy = FixedErrorSafetyStock(error=4.0, factor=1.5, scale_by_horizon=True)
+    ss = strategy.compute(forecast=FORECAST, actuals=None, period=0, lead_time=1, horizon=3, service_level_factor=1.5)
+    assert abs(ss - 1.5 * 4.0 * math.sqrt(4)) < 1e-9
+
+
+def test_fixed_error_rejects_negative_error():
+    from replenishment.strategies.safety_stock import FixedErrorSafetyStock
+    with pytest.raises(ValueError):
+        FixedErrorSafetyStock(error=-1.0)

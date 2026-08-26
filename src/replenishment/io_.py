@@ -41,8 +41,14 @@ from replenishment.calibration import CalibrationResult, optimize as calibration
 from replenishment.policy import ReplenishmentPolicy
 from replenishment.simulation import SimulationResult, simulate_replenishment
 from replenishment.strategies.multiplier import NullSafetyStockStrategy
-from replenishment.strategies.order_trigger import OrderUpToTrigger, ReorderPointTrigger
-from replenishment.strategies.safety_stock import KMaeSafetyStock, KRmseSafetyStock, SqrtHorizonSafetyStock
+from replenishment.strategies.order_trigger import (
+    FlatForecastOrderUpToTrigger, OrderUpToTrigger, ReorderPointTrigger)
+from replenishment.strategies.safety_stock import (
+    FixedErrorSafetyStock,
+    KMaeSafetyStock,
+    KRmseSafetyStock,
+    SqrtHorizonSafetyStock,
+)
 from replenishment.timeseries import TimeSeries
 
 
@@ -189,16 +195,28 @@ _SAFETY_STOCK_STRATEGIES = {
 }
 
 
-def _safety_stock_builder_for_method(method: str | None, factor: float):
+def _safety_stock_builder_for_method(
+    method: str | None, factor: float, fixed_error: float | None = None
+):
     """Map janrth's safety_stock_method string onto the new strategy
     classes. Only the three canonical method names are supported (per
     Task 11's brief) -- janrth's extra aliases ("legacy", "raw_rmse",
-    "k*mae", ...) are not re-created here."""
+    "k*mae", ...) are not re-created here.
+
+    When fixed_error is given, the method still selects the *shape*
+    (sqrt_horizon -> horizon-scaled, k_rmse/k_mae -> flat) but the error
+    value is the caller's, via FixedErrorSafetyStock -- for callers with
+    real pre-window error history (e.g. causal CV residuals)."""
     normalized = (method or "sqrt_horizon").strip().lower()
     strategy_cls = _SAFETY_STOCK_STRATEGIES.get(normalized)
     if strategy_cls is None:
         raise ValueError(
             f"safety_stock_method must be one of {sorted(_SAFETY_STOCK_STRATEGIES)}, got {method!r}."
+        )
+    if fixed_error is not None:
+        scale = normalized == "sqrt_horizon"
+        return lambda: FixedErrorSafetyStock(
+            error=fixed_error, factor=factor, scale_by_horizon=scale
         )
     return lambda: strategy_cls(factor=factor)
 
@@ -756,23 +774,18 @@ def build_point_forecast_article_configs(
     lead_time: Mapping[str, int] | int,
     initial_on_hand: Mapping[str, int] | int,
     service_level_factor: Mapping[str, float] | float,
-    service_level_mode: Mapping[str, str] | str | None = None,
     safety_stock_method: Mapping[str, str] | str | None = None,
     review_period: Mapping[str, int] | int | None = None,
     forecast_horizon: Mapping[str, int] | int | None = None,
-    rmse_window: Mapping[str, int] | int | None = None,
     policy_mode: str = "base_stock",
     holding_cost_per_unit: Mapping[str, float] | float = 0.0,
     stockout_cost_per_unit: Mapping[str, float] | float = 0.0,
     order_cost_per_order: Mapping[str, float] | float = 0.0,
     order_cost_per_unit: Mapping[str, float] | float = 0.0,
 ) -> dict[str, ArticleSimulationConfig]:
-    # service_level_mode/rmse_window are accepted for signature compatibility
-    # but not honored: safety_stock selection here only maps
-    # safety_stock_method to SqrtHorizonSafetyStock/KRmseSafetyStock/
-    # KMaeSafetyStock (Task 8), which always compute error from the full
-    # actuals-vs-forecast history with no fixed-window or fill-rate-mode
-    # option. See task-11-report.md concerns.
+    # safety_stock selection maps safety_stock_method to
+    # SqrtHorizonSafetyStock/KRmseSafetyStock/KMaeSafetyStock (Task 8), which
+    # always compute error from the full actuals-vs-forecast history.
     grouped: dict[str, dict[int, PointForecastRow]] = defaultdict(dict)
     for row in rows:
         if row.period < 0:
@@ -797,10 +810,6 @@ def build_point_forecast_article_configs(
             raise TypeError(
                 "safety_stock_method must be a string or mapping of strings."
             )
-        mode_value = _resolve_optional_value(
-            service_level_mode, unique_id, "service_level_mode"
-        )
-        _guard_service_level_mode(mode_value)
         article_lead_time = _resolve_value(lead_time, unique_id, "lead_time")
         article_review_period = _resolve_optional_value(
             review_period, unique_id, "review_period"
@@ -813,8 +822,11 @@ def build_point_forecast_article_configs(
             trigger = ReorderPointTrigger()
         elif policy_mode == "base_stock":
             trigger = OrderUpToTrigger()
+        elif policy_mode == "base_stock_flat":
+            trigger = FlatForecastOrderUpToTrigger()
         else:
-            raise ValueError("policy_mode must be 'base_stock' or 'rop'.")
+            raise ValueError(
+                "policy_mode must be 'base_stock', 'base_stock_flat', or 'rop'.")
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),
@@ -935,20 +947,20 @@ def build_point_forecast_article_configs_from_standard_rows(
     rows: Iterable[StandardSimulationRow],
     *,
     service_level_factor: Mapping[str, float] | float,
-    service_level_mode: Mapping[str, str] | str | None = None,
     safety_stock_method: Mapping[str, str] | str | None = None,
-    fixed_rmse: Mapping[str, float] | float | None = None,
     review_period: Mapping[str, int] | int | None = None,
     forecast_horizon: Mapping[str, int] | int | None = None,
-    rmse_window: Mapping[str, int] | int | None = None,
     use_current_stock: bool | None = None,
     actuals_override: Mapping[str, Iterable[int]] | None = None,
     policy_mode: str = "base_stock",
+    moq: Mapping[str, int] | int | None = None,
+    fixed_error: Mapping[str, float] | float | None = None,
 ) -> dict[str, ArticleSimulationConfig]:
-    # fixed_rmse/rmse_window are accepted for signature compatibility but not
-    # honored: SqrtHorizonSafetyStock/KRmseSafetyStock/KMaeSafetyStock (Task 8)
-    # always compute error from the full actuals-vs-forecast history, with no
-    # fixed-override or windowed-RMSE option. See task-11-report.md concerns.
+    # Without fixed_error, SqrtHorizonSafetyStock/KRmseSafetyStock/
+    # KMaeSafetyStock (Task 8) compute error from the actuals-vs-forecast
+    # history inside the simulation window. fixed_error supplies a
+    # caller-computed error (e.g. causal pre-window CV residuals) instead;
+    # safety_stock_method still picks the scaling shape.
     grouped = _group_standard_rows(rows)
     configs: dict[str, ArticleSimulationConfig] = {}
     for unique_id, ds_rows in grouped.items():
@@ -981,10 +993,6 @@ def build_point_forecast_article_configs_from_standard_rows(
             raise TypeError(
                 "safety_stock_method must be a string or mapping of strings."
             )
-        mode_value = _resolve_optional_value(
-            service_level_mode, unique_id, "service_level_mode"
-        )
-        _guard_service_level_mode(mode_value)
         factor = _resolve_value(service_level_factor, unique_id, "service_level_factor")
         article_review_period = _resolve_optional_value(
             review_period, unique_id, "review_period"
@@ -992,20 +1000,28 @@ def build_point_forecast_article_configs_from_standard_rows(
         article_forecast_horizon = _resolve_optional_value(
             forecast_horizon, unique_id, "forecast_horizon"
         ) or 1
+        article_moq = _resolve_optional_value(moq, unique_id, "moq") or 1
+        article_fixed_error = _resolve_optional_value(fixed_error, unique_id, "fixed_error")
         if policy_mode == "rop":
             trigger = ReorderPointTrigger()
         elif policy_mode == "base_stock":
             trigger = OrderUpToTrigger()
+        elif policy_mode == "base_stock_flat":
+            trigger = FlatForecastOrderUpToTrigger()
         else:
-            raise ValueError("policy_mode must be 'base_stock' or 'rop'.")
+            raise ValueError(
+                "policy_mode must be 'base_stock', 'base_stock_flat', or 'rop'.")
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),
-            safety_stock=_safety_stock_builder_for_method(safety_method_value, factor)(),
+            safety_stock=_safety_stock_builder_for_method(
+                safety_method_value, factor, article_fixed_error
+            )(),
             trigger=trigger,
             lead_time=lead_time,
             review_period=article_review_period,
             forecast_horizon=article_forecast_horizon,
+            moq=article_moq,
         )
         configs[unique_id] = ArticleSimulationConfig(
             periods=len(ordered),
@@ -1024,90 +1040,39 @@ def build_lead_time_forecast_article_configs_from_standard_rows(
     rows: Iterable[StandardSimulationRow],
     *,
     service_level_factor: Mapping[str, float] | float,
-    service_level_mode: Mapping[str, str] | str | None = None,
     safety_stock_method: Mapping[str, str] | str | None = None,
-    fixed_rmse: Mapping[str, float] | float | None = None,
     review_period: Mapping[str, int] | int | None = None,
     forecast_horizon: Mapping[str, int] | int | None = None,
-    rmse_window: Mapping[str, int] | int | None = None,
     use_current_stock: bool | None = None,
     actuals_override: Mapping[str, Iterable[int]] | None = None,
+    moq: Mapping[str, int] | int | None = None,
 ) -> dict[str, ArticleSimulationConfig]:
-    # janrth's LeadTimeForecastOptimizationPolicy used the same
-    # protection_horizon = lead_time + forecast_horizon scaling as
-    # PointForecastOptimizationPolicy's order_quantity_for/safety-stock math
-    # -- SqrtHorizonSafetyStock (Task 8) already combines lead_time + horizon
-    # this way internally, so no extra forecast_horizon adjustment is needed
-    # here beyond passing lead_time and forecast_horizon straight through.
-    #
-    # service_level_mode/fixed_rmse/rmse_window are accepted for signature
-    # compatibility but not honored: SqrtHorizonSafetyStock/KRmseSafetyStock/
-    # KMaeSafetyStock (Task 8) always compute error from the full
-    # actuals-vs-forecast history, with no fixed-override, windowed-RMSE, or
-    # fill-rate-mode option. See task-11-report.md concerns.
-    grouped = _group_standard_rows(rows)
-    configs: dict[str, ArticleSimulationConfig] = {}
-    for unique_id, ds_rows in grouped.items():
-        ordered = _order_rows_by_ds(unique_id, ds_rows)
-        lead_time = _ensure_constant(unique_id, ordered, "lead_time")
-        initial_on_hand = _ensure_constant(unique_id, ordered, "initial_on_hand")
-        current_stock = _ensure_constant(unique_id, ordered, "current_stock")
-        if use_current_stock is None:
-            use_current = all(row.is_forecast for row in ordered)
-        else:
-            use_current = use_current_stock
-        starting_stock = current_stock if use_current else initial_on_hand
-        holding_cost = _ensure_constant(unique_id, ordered, "holding_cost_per_unit")
-        stockout_cost = _ensure_constant(unique_id, ordered, "stockout_cost_per_unit")
-        order_cost = _ensure_constant(unique_id, ordered, "order_cost_per_order")
-        demand = [row.demand for row in ordered]
-        forecast = [row.forecast for row in ordered]
-        if actuals_override is None:
-            actuals = _trim_actuals_series(unique_id, ordered)
-        else:
-            if unique_id not in actuals_override:
-                raise ValueError(
-                    f"Missing actuals override for unique_id '{unique_id}'."
-                )
-            actuals = list(actuals_override[unique_id])
-        safety_method_value = _resolve_optional_value(
-            safety_stock_method, unique_id, "safety_stock_method"
-        )
-        if safety_method_value is not None and not isinstance(safety_method_value, str):
-            raise TypeError(
-                "safety_stock_method must be a string or mapping of strings."
-            )
-        mode_value = _resolve_optional_value(
-            service_level_mode, unique_id, "service_level_mode"
-        )
-        _guard_service_level_mode(mode_value)
-        factor = _resolve_value(service_level_factor, unique_id, "service_level_factor")
-        article_review_period = _resolve_optional_value(
-            review_period, unique_id, "review_period"
-        ) or 1
-        article_forecast_horizon = _resolve_optional_value(
-            forecast_horizon, unique_id, "forecast_horizon"
-        ) or 1
-        policy = ReplenishmentPolicy(
-            forecast=TimeSeries.from_values(forecast),
-            actuals=TimeSeries.from_values(actuals),
-            safety_stock=_safety_stock_builder_for_method(safety_method_value, factor)(),
-            trigger=OrderUpToTrigger(),
-            lead_time=lead_time,
-            review_period=article_review_period,
-            forecast_horizon=article_forecast_horizon,
-        )
-        configs[unique_id] = ArticleSimulationConfig(
-            periods=len(ordered),
-            demand=demand,
-            initial_on_hand=starting_stock,
-            lead_time=lead_time,
-            policy=policy,
-            holding_cost_per_unit=holding_cost,
-            stockout_cost_per_unit=stockout_cost,
-            order_cost_per_order=order_cost,
-        )
-    return configs
+    """Deprecated: use Portfolio.simulate(factor=..., horizon=lead_times) or
+    build_point_forecast_article_configs_from_standard_rows(...,
+    policy_mode="base_stock") -- this is that call verbatim.
+
+    (janrth's LeadTimeForecastOptimizationPolicy used the same
+    protection_horizon = lead_time + forecast_horizon scaling, which
+    SqrtHorizonSafetyStock already applies internally.)"""
+    warnings.warn(
+        "build_lead_time_forecast_article_configs_from_standard_rows is "
+        "deprecated; use replenishment.Portfolio (simulate/configs with "
+        "horizon=lead_times) or "
+        "build_point_forecast_article_configs_from_standard_rows.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return build_point_forecast_article_configs_from_standard_rows(
+        rows,
+        service_level_factor=service_level_factor,
+        safety_stock_method=safety_stock_method,
+        review_period=review_period,
+        forecast_horizon=forecast_horizon,
+        use_current_stock=use_current_stock,
+        actuals_override=actuals_override,
+        policy_mode="base_stock",
+        moq=moq,
+    )
 
 
 @dataclass(frozen=True)

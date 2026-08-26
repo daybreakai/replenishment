@@ -102,6 +102,39 @@ class KMaeSafetyStock:
         return self.factor * _mae(actual_values, forecast_values)
 
 
+@dataclass(frozen=True)
+class FixedErrorSafetyStock:
+    """SS = factor * error [* sqrt(lead_time + horizon)], with the error
+    supplied by the caller instead of computed from the policy's own
+    forecast-vs-actuals window.
+
+    This is the causal-error strategy: the history-based strategies above
+    can only see the simulation window, so a backtest replay seeded at some
+    origin computes its buffer from that window's own errors (zero at period
+    0, tiny samples early on). A caller with real pre-window error history
+    (e.g. cross-validation residuals before the cutoff) computes the error
+    there and passes it in; this class just applies factor and scaling.
+
+    scale_by_horizon=True mirrors SqrtHorizonSafetyStock's
+    sqrt(lead_time + horizon) protection scaling; False mirrors the flat
+    KRmse/KMae shape.
+    """
+
+    error: float
+    factor: float = 1.0
+    scale_by_horizon: bool = False
+
+    def __post_init__(self) -> None:
+        if self.error < 0:
+            raise ValueError("error must be non-negative.")
+
+    def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
+        if not self.scale_by_horizon:
+            return self.factor * self.error
+        protection_horizon = lead_time + horizon
+        return self.factor * self.error * math.sqrt(protection_horizon if protection_horizon > 0 else 1)
+
+
 class SafetyStockRangeError(ValueError):
     """Raised when a fill-rate target and error distribution combination
     falls outside the range inverse_normal_loss can solve exactly, and
