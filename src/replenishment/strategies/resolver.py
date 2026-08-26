@@ -32,27 +32,33 @@ def resolve_safety_stock_strategy(
 ) -> ResolvedSafetyStock:
     if has_actuals and periods_observed > 0:
         if target_fill_rate is not None:
-            strategy = FillRateSafetyStock(target_fill_rate=target_fill_rate)
-            return ResolvedSafetyStock(strategy=strategy, method=type(strategy).__name__, degraded=False)
+            try:
+                strategy = FillRateSafetyStock(target_fill_rate=target_fill_rate)
+                return ResolvedSafetyStock(strategy=strategy, method=type(strategy).__name__, degraded=False)
+            except ValueError:
+                pass  # invalid target_fill_rate -- fall through to the next rung
         if factor is not None:
             strategy = SqrtHorizonSafetyStock(factor=factor)
             return ResolvedSafetyStock(strategy=strategy, method=type(strategy).__name__, degraded=False)
         strategy = KRmseSafetyStock(factor=1.0)
         return ResolvedSafetyStock(
             strategy=strategy, method=type(strategy).__name__, degraded=True,
-            reason="No target_fill_rate or factor given; using a flat K-RMSE buffer (factor=1.0) "
-                   "as the last resolvable rung before Null.",
+            reason="No target_fill_rate or factor given (or target_fill_rate was invalid); using a flat "
+                   "K-RMSE buffer (factor=1.0) as the last resolvable rung before Null.",
         )
 
     if multiplier is not None:
-        strategy = MultiplierSafetyStockStrategy(multiplier=multiplier)
-        return ResolvedSafetyStock(
-            strategy=strategy, method=type(strategy).__name__, degraded=True,
-            reason="No actuals available to compute forecast error; using a flat multiplier instead.",
-        )
+        try:
+            strategy = MultiplierSafetyStockStrategy(multiplier=multiplier)
+            return ResolvedSafetyStock(
+                strategy=strategy, method=type(strategy).__name__, degraded=True,
+                reason="No actuals available to compute forecast error; using a flat multiplier instead.",
+            )
+        except ValueError:
+            pass  # invalid multiplier (< 1.0) -- fall through to Null
 
     strategy = NullSafetyStockStrategy()
     return ResolvedSafetyStock(
         strategy=strategy, method=type(strategy).__name__, degraded=True,
-        reason="No actuals and no multiplier given; safety stock defaulted to 0 -- treat with caution.",
+        reason="No actuals and no usable multiplier given; safety stock defaulted to 0 -- treat with caution.",
     )

@@ -56,3 +56,17 @@ def test_no_actuals_but_periods_observed_positive_is_not_enough():
         has_actuals=False, periods_observed=10, factor=1.65, target_fill_rate=0.95,
     )
     assert isinstance(resolved.strategy, NullSafetyStockStrategy)
+
+
+def test_falls_back_past_invalid_target_fill_rate_to_sqrt_horizon():
+    resolved = resolve_safety_stock_strategy(
+        has_actuals=True, periods_observed=10, target_fill_rate=1.5, factor=1.65,
+    )
+    assert isinstance(resolved.strategy, SqrtHorizonSafetyStock)
+    assert resolved.degraded is False
+
+
+def test_falls_back_to_null_when_multiplier_invalid():
+    resolved = resolve_safety_stock_strategy(has_actuals=False, periods_observed=0, multiplier=0.5)
+    assert isinstance(resolved.strategy, NullSafetyStockStrategy)
+    assert resolved.degraded is True
