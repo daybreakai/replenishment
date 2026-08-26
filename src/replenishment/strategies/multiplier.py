@@ -8,6 +8,11 @@ so `forecast_qty + safety_stock == forecast_qty * multiplier`.
 NullSafetyStockStrategy is for forecasts that already embed their own
 buffer (e.g. a percentile forecast) -- no separate policy class needed
 for that case, just compose ReplenishmentPolicy with this strategy.
+Its `value` field defaults to 0.0 ("no extra buffer") but also serves as
+a general frozen-constant strategy: pass a precomputed value to carry a
+correctly-computed safety-stock number from one window's computation into
+another window's policy (e.g. backtest -> evaluation), without pairing
+that window's forecast against a different window's actuals.
 """
 from __future__ import annotations
 
@@ -31,5 +36,7 @@ class MultiplierSafetyStockStrategy:
 
 @dataclass(frozen=True)
 class NullSafetyStockStrategy:
+    value: float = 0.0
+
     def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
-        return 0.0
+        return self.value
