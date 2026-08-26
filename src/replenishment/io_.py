@@ -41,7 +41,8 @@ from replenishment.calibration import CalibrationResult, optimize as calibration
 from replenishment.policy import ReplenishmentPolicy
 from replenishment.simulation import SimulationResult, simulate_replenishment
 from replenishment.strategies.multiplier import NullSafetyStockStrategy
-from replenishment.strategies.order_trigger import OrderUpToTrigger, ReorderPointTrigger
+from replenishment.strategies.order_trigger import (
+    FlatForecastOrderUpToTrigger, OrderUpToTrigger, ReorderPointTrigger)
 from replenishment.strategies.safety_stock import (
     FixedErrorSafetyStock,
     KMaeSafetyStock,
@@ -821,8 +822,11 @@ def build_point_forecast_article_configs(
             trigger = ReorderPointTrigger()
         elif policy_mode == "base_stock":
             trigger = OrderUpToTrigger()
+        elif policy_mode == "base_stock_flat":
+            trigger = FlatForecastOrderUpToTrigger()
         else:
-            raise ValueError("policy_mode must be 'base_stock' or 'rop'.")
+            raise ValueError(
+                "policy_mode must be 'base_stock', 'base_stock_flat', or 'rop'.")
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),
@@ -1002,8 +1006,11 @@ def build_point_forecast_article_configs_from_standard_rows(
             trigger = ReorderPointTrigger()
         elif policy_mode == "base_stock":
             trigger = OrderUpToTrigger()
+        elif policy_mode == "base_stock_flat":
+            trigger = FlatForecastOrderUpToTrigger()
         else:
-            raise ValueError("policy_mode must be 'base_stock' or 'rop'.")
+            raise ValueError(
+                "policy_mode must be 'base_stock', 'base_stock_flat', or 'rop'.")
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),

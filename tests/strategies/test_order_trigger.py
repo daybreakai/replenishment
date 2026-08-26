@@ -39,3 +39,27 @@ def test_reorder_point_triggers_only_below_rop():
     # lead_demand (2 periods) = 20; cycle_stock (3 periods after) = 30
     # reorder_point = 20 + 5 = 25; order_up_to = 25 + 30 = 55; order = 55 - 0 = 55
     assert qty_below_rop == 55
+
+
+class TestFlatForecastOrderUpToTrigger:
+    def test_target_is_next_forecast_times_horizon(self):
+        from replenishment.strategies.order_trigger import FlatForecastOrderUpToTrigger
+        trigger = FlatForecastOrderUpToTrigger()
+        forecast = TimeSeries.from_values([0, 10, 999, 999, 999])
+        qty = trigger.order_quantity(
+            inventory_position=5, period=0, review_period=1,
+            forecast=forecast, safety_stock=2.0, lead_time=1, forecast_horizon=3)
+        # target = forecast[1] * 3 + 2 = 32; qty = 32 - 5 = 27.
+        # The 999s at periods 2..4 (future-origin values under rolling
+        # one-step CV) must NOT enter the target — that is the leak this
+        # trigger exists to close.
+        assert qty == 27
+
+    def test_review_gate_still_applies(self):
+        from replenishment.strategies.order_trigger import FlatForecastOrderUpToTrigger
+        trigger = FlatForecastOrderUpToTrigger()
+        forecast = TimeSeries.from_values([0, 10, 10, 10])
+        qty = trigger.order_quantity(
+            inventory_position=0, period=1, review_period=2,
+            forecast=forecast, safety_stock=0.0, lead_time=1, forecast_horizon=2)
+        assert qty == 0

@@ -11,7 +11,7 @@ from replenishment.strategies.distributional_safety_stock import (
     KingsFormulaSafetyStock, CompoundPoissonSafetyStock,
 )
 from replenishment.strategies.order_trigger import (
-    OrderTrigger, OrderUpToTrigger, ReorderPointTrigger,
+    FlatForecastOrderUpToTrigger, OrderTrigger, OrderUpToTrigger, ReorderPointTrigger,
 )
 
 __all__ = [
@@ -20,6 +20,6 @@ __all__ = [
     "SafetyStockRangeError",
     "MultiplierSafetyStockStrategy", "NullSafetyStockStrategy",
     "DemandBufferDecorator", "KingsFormulaSafetyStock",
-    "CompoundPoissonSafetyStock", "OrderTrigger", "OrderUpToTrigger",
+    "CompoundPoissonSafetyStock", "FlatForecastOrderUpToTrigger", "OrderTrigger", "OrderUpToTrigger",
     "ReorderPointTrigger",
 ]
