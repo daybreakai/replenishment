@@ -31,21 +31,28 @@ def resolve_safety_stock_strategy(
     multiplier: float | None = None,
 ) -> ResolvedSafetyStock:
     if has_actuals and periods_observed > 0:
+        fill_rate_rejected_reason: str | None = None
         if target_fill_rate is not None:
             try:
                 strategy = FillRateSafetyStock(target_fill_rate=target_fill_rate)
                 return ResolvedSafetyStock(strategy=strategy, method=type(strategy).__name__, degraded=False)
-            except ValueError:
-                pass  # invalid target_fill_rate -- fall through to the next rung
+            except ValueError as exc:
+                fill_rate_rejected_reason = (
+                    f"target_fill_rate={target_fill_rate!r} was invalid ({exc}); fell back past it."
+                )
         if factor is not None:
             strategy = SqrtHorizonSafetyStock(factor=factor)
-            return ResolvedSafetyStock(strategy=strategy, method=type(strategy).__name__, degraded=False)
+            return ResolvedSafetyStock(
+                strategy=strategy, method=type(strategy).__name__,
+                degraded=fill_rate_rejected_reason is not None,
+                reason=fill_rate_rejected_reason,
+            )
         strategy = KRmseSafetyStock(factor=1.0)
-        return ResolvedSafetyStock(
-            strategy=strategy, method=type(strategy).__name__, degraded=True,
-            reason="No target_fill_rate or factor given (or target_fill_rate was invalid); using a flat "
-                   "K-RMSE buffer (factor=1.0) as the last resolvable rung before Null.",
-        )
+        reason = ("No target_fill_rate or factor given; using a flat K-RMSE buffer (factor=1.0) "
+                  "as the last resolvable rung before Null.")
+        if fill_rate_rejected_reason is not None:
+            reason = fill_rate_rejected_reason + " No factor given either; using a flat K-RMSE buffer (factor=1.0)."
+        return ResolvedSafetyStock(strategy=strategy, method=type(strategy).__name__, degraded=True, reason=reason)
 
     if multiplier is not None:
         try:
