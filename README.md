@@ -54,6 +54,43 @@ Swap `safety_stock=` for `FillRateSafetyStock(target_fill_rate=0.95)` or
 `SqrtHorizonSafetyStock(k=...)`, or use `.reorder_point(...)` instead of
 `.order_up_to(...)` — same call shape.
 
+## Panel usage (many items at once)
+
+Real inputs are usually a flat item/date/forecast/demand + cost table, not one
+series at a time. `io_.py` builds `ReplenishmentPolicy` objects straight from
+that shape:
+
+```python
+from replenishment.io_ import (
+    generate_standard_simulation_rows,
+    standard_simulation_rows_to_dataframe,
+    standard_simulation_rows_from_dataframe,
+    build_point_forecast_article_configs_from_standard_rows,
+)
+
+# swap this generator for your own panel df with the same columns:
+# unique_id, ds, demand, forecast, actuals, holding_cost_per_unit,
+# stockout_cost_per_unit, order_cost_per_order, lead_time, current_stock
+rows = generate_standard_simulation_rows(n_unique_ids=3, periods=60, seed=0)
+df = standard_simulation_rows_to_dataframe(rows)
+
+configs = build_point_forecast_article_configs_from_standard_rows(
+    standard_simulation_rows_from_dataframe(df),
+    service_level_factor=1.65,
+    safety_stock_method="k_rmse",
+)
+
+for unique_id, config in configs.items():
+    result = config.simulate()
+    print(unique_id, "fill_rate:", result.summary.fill_rate, "total_cost:", result.summary.total_cost)
+```
+
+`build_point_forecast_article_configs_from_standard_rows` groups rows by
+`unique_id`, builds one policy per item, and returns an
+`ArticleSimulationConfig` you call `.simulate()` on. Also accepts
+`policy_mode="rop"` for reorder-point instead of order-up-to, and per-item
+overrides (dict keyed by `unique_id`) for any of the cost/factor args.
+
 ## Notebooks
 
 Worked examples under [`notebooks/`](notebooks/): safety-stock variants,
