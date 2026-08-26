@@ -64,3 +64,40 @@ def test_build_policy_from_standard_rows_returns_a_working_policy():
         trigger=OrderUpToTrigger(), lead_time=1,
     )
     assert policy.lead_time == 1
+
+
+def test_point_builder_honors_per_item_fixed_error():
+    from replenishment.io_ import build_point_forecast_article_configs_from_standard_rows
+    from replenishment.strategies.safety_stock import FixedErrorSafetyStock, KRmseSafetyStock
+    rows = generate_standard_simulation_rows(
+        n_unique_ids=2, periods=20, history_mean=10, history_std=2,
+        forecast_mean=10, forecast_std=1, holding_cost_per_unit=1,
+        stockout_cost_per_unit=5, order_cost_per_order=2, lead_time=1, seed=7,
+    )
+    configs = build_point_forecast_article_configs_from_standard_rows(
+        rows, service_level_factor=2.0, safety_stock_method="k_rmse",
+        fixed_error={"A": 3.0, "B": 5.0},
+    )
+    ss_a = configs["A"].policy.safety_stock
+    assert isinstance(ss_a, FixedErrorSafetyStock)
+    assert ss_a.error == 3.0 and ss_a.factor == 2.0 and not ss_a.scale_by_horizon
+    assert configs["B"].policy.safety_stock.error == 5.0
+    # without fixed_error the method's history-based strategy is unchanged
+    plain = build_point_forecast_article_configs_from_standard_rows(
+        rows, service_level_factor=2.0, safety_stock_method="k_rmse",
+    )
+    assert isinstance(plain["A"].policy.safety_stock, KRmseSafetyStock)
+
+
+def test_fixed_error_sqrt_horizon_method_selects_scaled_shape():
+    from replenishment.io_ import build_point_forecast_article_configs_from_standard_rows
+    rows = generate_standard_simulation_rows(
+        n_unique_ids=1, periods=10, history_mean=10, history_std=2,
+        forecast_mean=10, forecast_std=1, holding_cost_per_unit=1,
+        stockout_cost_per_unit=5, order_cost_per_order=2, lead_time=1, seed=7,
+    )
+    configs = build_point_forecast_article_configs_from_standard_rows(
+        rows, service_level_factor=1.65, safety_stock_method="sqrt_horizon",
+        fixed_error=4.0,
+    )
+    assert configs["A"].policy.safety_stock.scale_by_horizon

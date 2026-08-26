@@ -1,6 +1,7 @@
 from replenishment.strategies.safety_stock import (
     SafetyStockStrategy, SqrtHorizonSafetyStock, KRmseSafetyStock,
-    KMaeSafetyStock, FillRateSafetyStock, SafetyStockRangeError,
+    KMaeSafetyStock, FillRateSafetyStock, FixedErrorSafetyStock,
+    SafetyStockRangeError,
 )
 from replenishment.strategies.multiplier import (
     MultiplierSafetyStockStrategy, NullSafetyStockStrategy,
@@ -15,7 +16,8 @@ from replenishment.strategies.order_trigger import (
 
 __all__ = [
     "SafetyStockStrategy", "SqrtHorizonSafetyStock", "KRmseSafetyStock",
-    "KMaeSafetyStock", "FillRateSafetyStock", "SafetyStockRangeError",
+    "KMaeSafetyStock", "FillRateSafetyStock", "FixedErrorSafetyStock",
+    "SafetyStockRangeError",
     "MultiplierSafetyStockStrategy", "NullSafetyStockStrategy",
     "DemandBufferDecorator", "KingsFormulaSafetyStock",
     "CompoundPoissonSafetyStock", "OrderTrigger", "OrderUpToTrigger",

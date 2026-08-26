@@ -140,6 +140,7 @@ class Portfolio:
         moq: Mapping[str, int] | int | None = None,
         use_current_stock: bool | None = None,
         actuals_override: Mapping[str, Iterable[int]] | None = None,
+        fixed_error: Mapping[str, float] | float | None = None,
     ) -> dict[str, ArticleSimulationConfig]:
         """Escape hatch: the raw per-item configs (e.g. for calibration.optimize)."""
         return build_point_forecast_article_configs_from_standard_rows(
@@ -152,12 +153,13 @@ class Portfolio:
             actuals_override=actuals_override,
             policy_mode=mode,
             moq=moq,
+            fixed_error=fixed_error,
         )
 
     def simulate(self, **knobs) -> PortfolioResult:
         """Build configs and simulate every item. Same knobs as configs():
         factor, horizon, method, mode, review_period, moq, use_current_stock,
-        actuals_override. horizon=lead_times is the lead-time-aware policy;
+        actuals_override, fixed_error. horizon=lead_times is the lead-time-aware policy;
         the default horizon=1 is the naive one-period target."""
         return PortfolioResult(
             {uid: cfg.simulate() for uid, cfg in self.configs(**knobs).items()}

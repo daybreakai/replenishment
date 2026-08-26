@@ -42,7 +42,12 @@ from replenishment.policy import ReplenishmentPolicy
 from replenishment.simulation import SimulationResult, simulate_replenishment
 from replenishment.strategies.multiplier import NullSafetyStockStrategy
 from replenishment.strategies.order_trigger import OrderUpToTrigger, ReorderPointTrigger
-from replenishment.strategies.safety_stock import KMaeSafetyStock, KRmseSafetyStock, SqrtHorizonSafetyStock
+from replenishment.strategies.safety_stock import (
+    FixedErrorSafetyStock,
+    KMaeSafetyStock,
+    KRmseSafetyStock,
+    SqrtHorizonSafetyStock,
+)
 from replenishment.timeseries import TimeSeries
 
 
@@ -189,16 +194,28 @@ _SAFETY_STOCK_STRATEGIES = {
 }
 
 
-def _safety_stock_builder_for_method(method: str | None, factor: float):
+def _safety_stock_builder_for_method(
+    method: str | None, factor: float, fixed_error: float | None = None
+):
     """Map janrth's safety_stock_method string onto the new strategy
     classes. Only the three canonical method names are supported (per
     Task 11's brief) -- janrth's extra aliases ("legacy", "raw_rmse",
-    "k*mae", ...) are not re-created here."""
+    "k*mae", ...) are not re-created here.
+
+    When fixed_error is given, the method still selects the *shape*
+    (sqrt_horizon -> horizon-scaled, k_rmse/k_mae -> flat) but the error
+    value is the caller's, via FixedErrorSafetyStock -- for callers with
+    real pre-window error history (e.g. causal CV residuals)."""
     normalized = (method or "sqrt_horizon").strip().lower()
     strategy_cls = _SAFETY_STOCK_STRATEGIES.get(normalized)
     if strategy_cls is None:
         raise ValueError(
             f"safety_stock_method must be one of {sorted(_SAFETY_STOCK_STRATEGIES)}, got {method!r}."
+        )
+    if fixed_error is not None:
+        scale = normalized == "sqrt_horizon"
+        return lambda: FixedErrorSafetyStock(
+            error=fixed_error, factor=factor, scale_by_horizon=scale
         )
     return lambda: strategy_cls(factor=factor)
 
@@ -933,9 +950,13 @@ def build_point_forecast_article_configs_from_standard_rows(
     actuals_override: Mapping[str, Iterable[int]] | None = None,
     policy_mode: str = "base_stock",
     moq: Mapping[str, int] | int | None = None,
+    fixed_error: Mapping[str, float] | float | None = None,
 ) -> dict[str, ArticleSimulationConfig]:
-    # SqrtHorizonSafetyStock/KRmseSafetyStock/KMaeSafetyStock (Task 8) always
-    # compute error from the full actuals-vs-forecast history.
+    # Without fixed_error, SqrtHorizonSafetyStock/KRmseSafetyStock/
+    # KMaeSafetyStock (Task 8) compute error from the actuals-vs-forecast
+    # history inside the simulation window. fixed_error supplies a
+    # caller-computed error (e.g. causal pre-window CV residuals) instead;
+    # safety_stock_method still picks the scaling shape.
     grouped = _group_standard_rows(rows)
     configs: dict[str, ArticleSimulationConfig] = {}
     for unique_id, ds_rows in grouped.items():
@@ -976,6 +997,7 @@ def build_point_forecast_article_configs_from_standard_rows(
             forecast_horizon, unique_id, "forecast_horizon"
         ) or 1
         article_moq = _resolve_optional_value(moq, unique_id, "moq") or 1
+        article_fixed_error = _resolve_optional_value(fixed_error, unique_id, "fixed_error")
         if policy_mode == "rop":
             trigger = ReorderPointTrigger()
         elif policy_mode == "base_stock":
@@ -985,7 +1007,9 @@ def build_point_forecast_article_configs_from_standard_rows(
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),
-            safety_stock=_safety_stock_builder_for_method(safety_method_value, factor)(),
+            safety_stock=_safety_stock_builder_for_method(
+                safety_method_value, factor, article_fixed_error
+            )(),
             trigger=trigger,
             lead_time=lead_time,
             review_period=article_review_period,
