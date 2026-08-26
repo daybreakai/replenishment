@@ -71,3 +71,18 @@ def test_falls_back_to_null_when_multiplier_invalid():
     resolved = resolve_safety_stock_strategy(has_actuals=False, periods_observed=0, multiplier=0.5)
     assert isinstance(resolved.strategy, NullSafetyStockStrategy)
     assert resolved.degraded is True
+
+
+def test_multiplier_rejection_reason_names_invalid_value():
+    resolved = resolve_safety_stock_strategy(has_actuals=False, periods_observed=0, multiplier=0.5)
+    assert isinstance(resolved.strategy, NullSafetyStockStrategy)
+    assert resolved.degraded is True
+    assert resolved.reason is not None and "0.5" in resolved.reason
+
+
+def test_multiplier_given_but_ignored_on_actuals_path_is_noted():
+    resolved = resolve_safety_stock_strategy(
+        has_actuals=True, periods_observed=10, factor=1.65, multiplier=1.2,
+    )
+    assert resolved.degraded is True
+    assert resolved.reason is not None and "multiplier" in resolved.reason

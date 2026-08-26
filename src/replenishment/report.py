@@ -7,15 +7,16 @@ reason instead of omitted silently.
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from replenishment.portfolio import PortfolioResult
 from replenishment.simulation import SimulationResult
-from replenishment.strategies.resolver import ResolvedSafetyStock
+from replenishment.strategies.resolver import ResolvedSafetyStock, resolve_safety_stock_strategy
 
 HealthStatus = Literal["Healthy", "Understock Risk", "No Data"]
 
@@ -30,12 +31,19 @@ SKIPPED_STAGES = [
 
 @dataclass(frozen=True)
 class PolicyRun:
+    """One item's simulation result paired with the safety-stock strategy
+    resolve_safety_stock_strategy picked for it, ready to feed build_report()."""
+
     label: str
     result: SimulationResult
     resolved_safety_stock: ResolvedSafetyStock
 
 
 class PolicyHealth(BaseModel):
+    """One item's row in a ReplenishmentReport."""
+
+    model_config = ConfigDict(frozen=True)
+
     label: str
     fill_rate: float
     avg_on_hand: float
@@ -47,17 +55,29 @@ class PolicyHealth(BaseModel):
 
 
 class PortfolioSummary(BaseModel):
+    """Aggregate counts and stage transparency for a ReplenishmentReport."""
+
+    model_config = ConfigDict(frozen=True)
+
     total_policies: int
-    status_counts: dict[str, int]
+    status_counts: dict[HealthStatus, int]
     stages_applied: list[str]
     stages_skipped: list[str]
 
 
 class ReplenishmentReport(BaseModel):
+    """A validated, typed replenishment health report: per-item records plus
+    a portfolio-level summary. See build_report() to construct one."""
+
+    model_config = ConfigDict(frozen=True)
+
     records: list[PolicyHealth]
     summary: PortfolioSummary
 
     def to_markdown(self) -> str:
+        """Render the same shape of report Duvo's scripts print()ed to
+        stdout, but from this validated model instead of raw string
+        formatting."""
         lines = ["## Replenishment Health Report", ""]
         lines.append(f"**Stages applied:** {', '.join(self.summary.stages_applied)}")
         lines.append(f"**Stages skipped:** {'; '.join(self.summary.stages_skipped)}")
@@ -65,8 +85,9 @@ class ReplenishmentReport(BaseModel):
         lines.append("| Label | Fill Rate | Avg On-Hand | Total Cost | SS Method | Degraded | Status |")
         lines.append("|-------|-----------|-------------|------------|-----------|----------|--------|")
         for r in self.records:
+            label = r.label.replace("|", "\\|")
             lines.append(
-                f"| {r.label} | {r.fill_rate:.1%} | {r.avg_on_hand:.1f} | "
+                f"| {label} | {r.fill_rate:.1%} | {r.avg_on_hand:.1f} | "
                 f"${r.total_cost:,.2f} | {r.safety_stock_method} | {r.degraded} | {r.health_status} |"
             )
         lines.append("")
@@ -84,6 +105,8 @@ class ReplenishmentReport(BaseModel):
 def _health_status(fill_rate: float, total_demand: int, understock_fill_rate_threshold: float) -> HealthStatus:
     if total_demand == 0:
         return "No Data"
+    if not math.isfinite(fill_rate):
+        return "No Data"  # a non-finite fill rate is a broken metric, never "Healthy"
     if fill_rate < understock_fill_rate_threshold:
         return "Understock Risk"
     return "Healthy"
@@ -94,6 +117,9 @@ def build_report(
     *,
     understock_fill_rate_threshold: float = UNDERSTOCK_FILL_RATE_THRESHOLD,
 ) -> ReplenishmentReport:
+    """Build a ReplenishmentReport from per-item PolicyRuns. Always lists
+    SKIPPED_STAGES under summary.stages_skipped (overstock/dead-stock/ABC-XYZ
+    -- see module docstring) rather than omitting them silently."""
     records: list[PolicyHealth] = []
     for entry in entries:
         summary = entry.result.summary
@@ -109,7 +135,7 @@ def build_report(
             health_status=status,
         ))
 
-    status_counts: dict[str, int] = {}
+    status_counts: dict[HealthStatus, int] = {}
     for r in records:
         status_counts[r.health_status] = status_counts.get(r.health_status, 0) + 1
 
@@ -132,8 +158,19 @@ def policy_runs_from_portfolio(
     portfolio_metrics()) -- this only re-keys its per-item SimulationResults
     against a caller-supplied {unique_id: ResolvedSafetyStock} mapping so
     they can feed build_report().
+
+    An id missing from resolved_strategies does not raise -- it degrades to
+    a NullSafetyStockStrategy (via resolve_safety_stock_strategy) with a
+    reason naming the missing id, matching this module's never-omit-silently
+    principle rather than crashing on a caller's incomplete mapping.
     """
-    return [
-        PolicyRun(label=unique_id, result=result, resolved_safety_stock=resolved_strategies[unique_id])
-        for unique_id, result in portfolio_result.results.items()
-    ]
+    runs = []
+    for unique_id, result in portfolio_result.results.items():
+        resolved = resolved_strategies.get(unique_id)
+        if resolved is None:
+            resolved = resolve_safety_stock_strategy(has_actuals=False, periods_observed=0)
+            resolved = resolved.model_copy(update={
+                "reason": f"No resolved safety-stock strategy supplied for {unique_id!r}; defaulted to Null.",
+            })
+        runs.append(PolicyRun(label=unique_id, result=result, resolved_safety_stock=resolved))
+    return runs

@@ -13,6 +13,7 @@ from replenishment.strategies.distributional_safety_stock import (
 from replenishment.strategies.order_trigger import (
     FlatForecastOrderUpToTrigger, OrderTrigger, OrderUpToTrigger, ReorderPointTrigger,
 )
+from replenishment.strategies.resolver import ResolvedSafetyStock, resolve_safety_stock_strategy
 
 __all__ = [
     "SafetyStockStrategy", "SqrtHorizonSafetyStock", "KRmseSafetyStock",
@@ -21,5 +22,5 @@ __all__ = [
     "MultiplierSafetyStockStrategy", "NullSafetyStockStrategy",
     "DemandBufferDecorator", "KingsFormulaSafetyStock",
     "CompoundPoissonSafetyStock", "FlatForecastOrderUpToTrigger", "OrderTrigger", "OrderUpToTrigger",
-    "ReorderPointTrigger",
+    "ReorderPointTrigger", "ResolvedSafetyStock", "resolve_safety_stock_strategy",
 ]
