@@ -149,6 +149,9 @@ def test_negative_binomial_method_maps_factor_to_target_service_level():
     ss = configs["A"].policy.safety_stock
     assert isinstance(ss, NegativeBinomialSafetyStock)
     assert ss.target_service_level == 0.90
+    # builder-level default: a portfolio-wide sweep shouldn't abort on one
+    # non-overdispersed item (see _safety_stock_builder_for_method)
+    assert ss.on_underdispersion == "zero"
 
 
 def test_fixed_error_rejected_for_probability_parameterized_methods():

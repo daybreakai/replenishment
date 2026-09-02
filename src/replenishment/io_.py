@@ -249,6 +249,17 @@ def _safety_stock_builder_for_method(
         return lambda: FixedErrorSafetyStock(
             error=fixed_error, factor=factor, scale_by_horizon=scale
         )
+    if normalized == "negative_binomial":
+        # NegativeBinomialSafetyStock's own default (on_underdispersion=
+        # "raise") is right for a single direct caller who wants to know
+        # immediately that an item doesn't fit the overdispersion
+        # assumption. This builder feeds a portfolio-wide sweep across
+        # potentially hundreds of items instead, where one non-overdispersed
+        # item (a genuinely steady/low-variance SKU is a real, not rare,
+        # case) shouldn't abort the whole run -- degrade to "no computed
+        # buffer for this item" instead, matching how the RMSE-based
+        # methods already degrade to zero for a zero-error item.
+        return lambda: strategy_cls(target_service_level=factor, on_underdispersion="zero")
     return lambda: strategy_cls(**{_FACTOR_KWARG[normalized]: factor})
 
 
