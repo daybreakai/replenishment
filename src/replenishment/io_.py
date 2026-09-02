@@ -42,7 +42,8 @@ from replenishment.policy import ReplenishmentPolicy
 from replenishment.simulation import SimulationResult, simulate_replenishment
 from replenishment.strategies.multiplier import NullSafetyStockStrategy
 from replenishment.strategies.order_trigger import (
-    FlatForecastOrderUpToTrigger, OrderUpToTrigger, ReorderPointTrigger)
+    FlatForecastOrderUpToTrigger, FlatReorderPointTrigger, OrderUpToTrigger,
+    ReorderPointTrigger)
 from replenishment.strategies.safety_stock import (
     FixedErrorSafetyStock,
     KMaeSafetyStock,
@@ -820,13 +821,15 @@ def build_point_forecast_article_configs(
         factor = _resolve_value(service_level_factor, unique_id, "service_level_factor")
         if policy_mode == "rop":
             trigger = ReorderPointTrigger()
+        elif policy_mode == "rop_flat":
+            trigger = FlatReorderPointTrigger()
         elif policy_mode == "base_stock":
             trigger = OrderUpToTrigger()
         elif policy_mode == "base_stock_flat":
             trigger = FlatForecastOrderUpToTrigger()
         else:
             raise ValueError(
-                "policy_mode must be 'base_stock', 'base_stock_flat', or 'rop'.")
+                "policy_mode must be 'base_stock', 'base_stock_flat', 'rop', or 'rop_flat'.")
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),
@@ -1004,13 +1007,15 @@ def build_point_forecast_article_configs_from_standard_rows(
         article_fixed_error = _resolve_optional_value(fixed_error, unique_id, "fixed_error")
         if policy_mode == "rop":
             trigger = ReorderPointTrigger()
+        elif policy_mode == "rop_flat":
+            trigger = FlatReorderPointTrigger()
         elif policy_mode == "base_stock":
             trigger = OrderUpToTrigger()
         elif policy_mode == "base_stock_flat":
             trigger = FlatForecastOrderUpToTrigger()
         else:
             raise ValueError(
-                "policy_mode must be 'base_stock', 'base_stock_flat', or 'rop'.")
+                "policy_mode must be 'base_stock', 'base_stock_flat', 'rop', or 'rop_flat'.")
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),

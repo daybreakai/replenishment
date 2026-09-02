@@ -63,3 +63,39 @@ class TestFlatForecastOrderUpToTrigger:
             inventory_position=0, period=1, review_period=2,
             forecast=forecast, safety_stock=0.0, lead_time=1, forecast_horizon=2)
         assert qty == 0
+
+
+class TestFlatReorderPointTrigger:
+    def test_target_uses_next_forecast_not_summed_future_values(self):
+        from replenishment.strategies.order_trigger import FlatReorderPointTrigger
+        trigger = FlatReorderPointTrigger()
+        forecast = TimeSeries.from_values([0, 10, 999, 999, 999])
+        qty = trigger.order_quantity(
+            inventory_position=5, period=0, review_period=1,
+            forecast=forecast, safety_stock=2.0, lead_time=1, forecast_horizon=3)
+        # flat_forecast = forecast[1] = 10 (the 999s -- future-origin values
+        # under rolling one-step CV -- must never enter the target, same
+        # leak FlatForecastOrderUpToTrigger closes for the order-up-to case)
+        # lead_demand = 10*1 = 10; cycle_stock = 10*3 = 30
+        # reorder_point = 10 + 2 = 12; order_up_to = 12 + 30 = 42
+        # inventory_position(5) <= reorder_point(12) -> order 42 - 5 = 37
+        assert qty == 37
+
+    def test_does_not_order_above_reorder_point(self):
+        from replenishment.strategies.order_trigger import FlatReorderPointTrigger
+        trigger = FlatReorderPointTrigger()
+        forecast = TimeSeries.from_values([0, 10, 10, 10])
+        qty = trigger.order_quantity(
+            inventory_position=100, period=0, review_period=1,
+            forecast=forecast, safety_stock=2.0, lead_time=1, forecast_horizon=2)
+        # reorder_point = 10*1 + 2 = 12; inventory_position(100) > 12 -> 0
+        assert qty == 0
+
+    def test_review_gate_still_applies(self):
+        from replenishment.strategies.order_trigger import FlatReorderPointTrigger
+        trigger = FlatReorderPointTrigger()
+        forecast = TimeSeries.from_values([0, 10, 10, 10])
+        qty = trigger.order_quantity(
+            inventory_position=0, period=1, review_period=2,
+            forecast=forecast, safety_stock=0.0, lead_time=1, forecast_horizon=2)
+        assert qty == 0
