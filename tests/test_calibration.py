@@ -16,6 +16,19 @@ def _policy_builder(factor: float) -> ReplenishmentPolicy:
     )
 
 
+def _oscillating_policy_builder(factor: float) -> ReplenishmentPolicy:
+    # Forecast is flat 10 but actuals oscillate 5/15 -- nonzero RMSE, so
+    # unlike _policy_builder above (forecast == actuals, RMSE=0, factor is
+    # a no-op), the safety-stock factor actually changes fill_rate here.
+    forecast = TimeSeries.from_values([10] * 60)
+    actuals = TimeSeries.from_values([5, 15] * 30)
+    return ReplenishmentPolicy.order_up_to(
+        forecast=forecast, actuals=actuals,
+        safety_stock=SqrtHorizonSafetyStock(factor=factor),
+        lead_time=2, forecast_horizon=1,
+    )
+
+
 def test_optimize_picks_a_candidate_from_the_provided_list():
     result = optimize(
         candidate_builder=_policy_builder, candidate_values=[0.5, 1.0, 1.65, 2.33],
@@ -105,6 +118,68 @@ def test_optimize_validation_uses_period_offset_matching_search_periods():
         periods=1, demand=[100], initial_on_hand=0, lead_time=0, policy=policy, period_offset=28,
     )
     assert r1.snapshots[0].period == 28
+
+
+def test_optimize_unconstrained_by_default_matches_prior_behavior():
+    result = optimize(
+        candidate_builder=_policy_builder, candidate_values=[0.0, 3.0],
+        periods=40, demand=[10] * 40, initial_on_hand=0, lead_time=2,
+        holding_cost_per_unit=1.0, stockout_cost_per_unit=5.0,
+    )
+    assert result.min_fill_rate is None
+    assert result.fill_constraint_met is True
+    assert result.best_value == min(result.all_costs, key=result.all_costs.get)
+
+
+def test_optimize_with_fill_floor_prefers_more_expensive_candidate_that_clears_it():
+    # Oscillating demand (5/15), zero on-hand: factor=1.0 is the cheapest
+    # candidate overall (cost=6.0) but only reaches fill_rate=0.95;
+    # factor=3.0 costs far more (cost=192.0) but reaches fill_rate=1.0.
+    # Unconstrained, optimize() would pick 1.0 (cheapest). A 0.99 fill
+    # floor must rule 1.0 out and pick 3.0 instead, proving the floor
+    # actually overrides the cost-minimizing pick, not just agrees with it.
+    unconstrained = optimize(
+        candidate_builder=_oscillating_policy_builder, candidate_values=[0.0, 1.0, 3.0],
+        periods=40, demand=[5, 15] * 20, initial_on_hand=0, lead_time=2,
+        holding_cost_per_unit=1.0, stockout_cost_per_unit=1.0,
+    )
+    assert unconstrained.best_value == 1.0
+
+    constrained = optimize(
+        candidate_builder=_oscillating_policy_builder, candidate_values=[0.0, 1.0, 3.0],
+        periods=40, demand=[5, 15] * 20, initial_on_hand=0, lead_time=2,
+        holding_cost_per_unit=1.0, stockout_cost_per_unit=1.0,
+        min_fill_rate=0.99,
+    )
+    assert constrained.best_value == 3.0
+    assert constrained.fill_constraint_met is True
+    assert constrained.best_validation_fill_rate >= 0.99
+
+
+def test_optimize_with_unreachable_fill_floor_falls_back_to_highest_fill_not_lowest_cost():
+    # Neither candidate reaches fill_rate=0.98 here (0.5 and 0.95), so the
+    # floor is unreachable. The fallback must pick the higher-fill
+    # candidate (factor=1.0, fill=0.95), not silently fall back to the
+    # unconstrained cost-minimizer.
+    result = optimize(
+        candidate_builder=_oscillating_policy_builder, candidate_values=[0.0, 1.0],
+        periods=40, demand=[5, 15] * 20, initial_on_hand=0, lead_time=2,
+        holding_cost_per_unit=1.0, stockout_cost_per_unit=1.0,
+        min_fill_rate=0.98,
+    )
+    assert result.fill_constraint_met is False
+    assert result.best_value == 1.0
+    assert result.all_fill_rates[1.0] > result.all_fill_rates[0.0]
+
+
+def test_optimize_rejects_out_of_range_min_fill_rate():
+    with pytest.raises(ValueError, match="min_fill_rate"):
+        optimize(
+            candidate_builder=_policy_builder, candidate_values=[1.0],
+            periods=40, demand=[10] * 40, initial_on_hand=20, lead_time=2,
+            holding_cost_per_unit=1.0, stockout_cost_per_unit=5.0,
+            min_fill_rate=1.5,
+        )
 
 
 def test_optimize_carries_in_flight_pipeline_from_search_into_validation():
