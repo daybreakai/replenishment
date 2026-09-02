@@ -101,3 +101,50 @@ def test_fixed_error_sqrt_horizon_method_selects_scaled_shape():
         fixed_error=4.0,
     )
     assert configs["A"].policy.safety_stock.scale_by_horizon
+
+
+def test_fill_rate_method_maps_factor_to_target_fill_rate():
+    from replenishment.io_ import build_point_forecast_article_configs_from_standard_rows
+    from replenishment.strategies.safety_stock import FillRateSafetyStock
+    rows = generate_standard_simulation_rows(
+        n_unique_ids=1, periods=20, history_mean=10, history_std=2,
+        forecast_mean=10, forecast_std=1, holding_cost_per_unit=1,
+        stockout_cost_per_unit=5, order_cost_per_order=2, lead_time=1, seed=7,
+    )
+    configs = build_point_forecast_article_configs_from_standard_rows(
+        rows, service_level_factor=0.95, safety_stock_method="fill_rate",
+    )
+    ss = configs["A"].policy.safety_stock
+    assert isinstance(ss, FillRateSafetyStock)
+    assert ss.target_fill_rate == 0.95
+
+
+def test_compound_poisson_method_maps_factor_to_target_service_level():
+    from replenishment.io_ import build_point_forecast_article_configs_from_standard_rows
+    from replenishment.strategies.distributional_safety_stock import CompoundPoissonSafetyStock
+    rows = generate_standard_simulation_rows(
+        n_unique_ids=1, periods=20, history_mean=10, history_std=2,
+        forecast_mean=10, forecast_std=1, holding_cost_per_unit=1,
+        stockout_cost_per_unit=5, order_cost_per_order=2, lead_time=1, seed=7,
+    )
+    configs = build_point_forecast_article_configs_from_standard_rows(
+        rows, service_level_factor=0.90, safety_stock_method="compound_poisson",
+    )
+    ss = configs["A"].policy.safety_stock
+    assert isinstance(ss, CompoundPoissonSafetyStock)
+    assert ss.target_service_level == 0.90
+
+
+def test_fixed_error_rejected_for_probability_parameterized_methods():
+    import pytest
+    from replenishment.io_ import build_point_forecast_article_configs_from_standard_rows
+    rows = generate_standard_simulation_rows(
+        n_unique_ids=1, periods=20, history_mean=10, history_std=2,
+        forecast_mean=10, forecast_std=1, holding_cost_per_unit=1,
+        stockout_cost_per_unit=5, order_cost_per_order=2, lead_time=1, seed=7,
+    )
+    with pytest.raises(ValueError, match="no forecast-error series"):
+        build_point_forecast_article_configs_from_standard_rows(
+            rows, service_level_factor=0.95, safety_stock_method="fill_rate",
+            fixed_error=4.0,
+        )
