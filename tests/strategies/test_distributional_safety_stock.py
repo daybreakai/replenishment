@@ -253,3 +253,10 @@ def test_negative_binomial_requires_actuals():
 def test_compound_poisson_rejects_zero_simulations():
     with pytest.raises(ValueError):
         CompoundPoissonSafetyStock(n_simulations=0)
+
+
+def test_compound_poisson_default_n_simulations_is_1000_not_5000():
+    """2026-09-02: 5000 was overkill for this method's actual usage pattern
+    (called many thousands of times per backtest) relative to the precision
+    it buys (Monte Carlo quantile error ~ sqrt(p(1-p)/n))."""
+    assert CompoundPoissonSafetyStock().n_simulations == 1000

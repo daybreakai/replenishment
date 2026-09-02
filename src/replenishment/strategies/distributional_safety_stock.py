@@ -71,7 +71,7 @@ class KingsFormulaSafetyStock:
 
 def _poisson(rate: float, rng: random.Random) -> int:
     """Knuth's algorithm. ponytail: O(rate) per draw, fine at the
-    n_simulations=5000-ish scale this strategy defaults to; swap for an
+    n_simulations=1000-ish scale this strategy defaults to; swap for an
     inversion/PTRS sampler if rate or n_simulations grows large."""
     if rate <= 0:
         return 0
@@ -103,10 +103,20 @@ class CompoundPoissonSafetyStock:
     by default, which is the wrong default for a policy-simulation library
     where "rerun the same backtest, get the same numbers" is an expected
     property. Pass seed=None explicitly for fresh randomness each call.
+
+    n_simulations defaults to 1000, not 5000: Monte Carlo quantile error
+    scales as sqrt(p(1-p)/n), so 1000 vs 5000 only widens the standard
+    error on a 95th-percentile estimate from ~0.3% to ~0.7% of rank
+    position -- small next to everything else already approximate in a
+    demand-planning pipeline (the fitted demand model, tier-pooling, etc.),
+    while this method is typically called many thousands of times per
+    backtest (every period x every item x every candidate k), where total
+    runtime scales linearly with n_simulations. Raise it for a final,
+    one-off high-precision confirmation run if needed.
     """
 
     target_service_level: float = 0.95
-    n_simulations: int = 5000
+    n_simulations: int = 1000
     seed: int | None = 0
 
     def __post_init__(self) -> None:
