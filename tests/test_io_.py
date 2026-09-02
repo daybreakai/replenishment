@@ -135,6 +135,22 @@ def test_compound_poisson_method_maps_factor_to_target_service_level():
     assert ss.target_service_level == 0.90
 
 
+def test_negative_binomial_method_maps_factor_to_target_service_level():
+    from replenishment.io_ import build_point_forecast_article_configs_from_standard_rows
+    from replenishment.strategies.distributional_safety_stock import NegativeBinomialSafetyStock
+    rows = generate_standard_simulation_rows(
+        n_unique_ids=1, periods=20, history_mean=10, history_std=2,
+        forecast_mean=10, forecast_std=1, holding_cost_per_unit=1,
+        stockout_cost_per_unit=5, order_cost_per_order=2, lead_time=1, seed=7,
+    )
+    configs = build_point_forecast_article_configs_from_standard_rows(
+        rows, service_level_factor=0.90, safety_stock_method="negative_binomial",
+    )
+    ss = configs["A"].policy.safety_stock
+    assert isinstance(ss, NegativeBinomialSafetyStock)
+    assert ss.target_service_level == 0.90
+
+
 def test_fixed_error_rejected_for_probability_parameterized_methods():
     import pytest
     from replenishment.io_ import build_point_forecast_article_configs_from_standard_rows

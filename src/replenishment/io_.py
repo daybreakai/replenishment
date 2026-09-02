@@ -44,7 +44,9 @@ from replenishment.strategies.multiplier import NullSafetyStockStrategy
 from replenishment.strategies.order_trigger import (
     FlatForecastOrderUpToTrigger, FlatReorderPointTrigger, OrderUpToTrigger,
     ReorderPointTrigger)
-from replenishment.strategies.distributional_safety_stock import CompoundPoissonSafetyStock
+from replenishment.strategies.distributional_safety_stock import (
+    CompoundPoissonSafetyStock, NegativeBinomialSafetyStock,
+)
 from replenishment.strategies.safety_stock import (
     FillRateSafetyStock,
     FixedErrorSafetyStock,
@@ -197,6 +199,7 @@ _SAFETY_STOCK_STRATEGIES = {
     "k_mae": KMaeSafetyStock,
     "fill_rate": FillRateSafetyStock,
     "compound_poisson": CompoundPoissonSafetyStock,
+    "negative_binomial": NegativeBinomialSafetyStock,
 }
 
 # Every strategy above takes exactly one calibratable scalar in its
@@ -212,6 +215,7 @@ _FACTOR_KWARG = {
     "k_mae": "factor",
     "fill_rate": "target_fill_rate",
     "compound_poisson": "target_service_level",
+    "negative_binomial": "target_service_level",
 }
 
 

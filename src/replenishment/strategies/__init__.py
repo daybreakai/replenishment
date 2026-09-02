@@ -9,6 +9,7 @@ from replenishment.strategies.multiplier import (
 from replenishment.strategies.demand_buffer import DemandBufferDecorator
 from replenishment.strategies.distributional_safety_stock import (
     KingsFormulaSafetyStock, CompoundPoissonSafetyStock,
+    NegativeBinomialSafetyStock, NegativeBinomialRangeError,
 )
 from replenishment.strategies.order_trigger import (
     FlatForecastOrderUpToTrigger, OrderTrigger, OrderUpToTrigger, ReorderPointTrigger,
@@ -20,6 +21,8 @@ __all__ = [
     "SafetyStockRangeError",
     "MultiplierSafetyStockStrategy", "NullSafetyStockStrategy",
     "DemandBufferDecorator", "KingsFormulaSafetyStock",
-    "CompoundPoissonSafetyStock", "FlatForecastOrderUpToTrigger", "OrderTrigger", "OrderUpToTrigger",
+    "CompoundPoissonSafetyStock", "NegativeBinomialSafetyStock",
+    "NegativeBinomialRangeError",
+    "FlatForecastOrderUpToTrigger", "OrderTrigger", "OrderUpToTrigger",
     "ReorderPointTrigger",
 ]

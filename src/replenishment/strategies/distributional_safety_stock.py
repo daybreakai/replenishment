@@ -15,6 +15,7 @@ import math
 import random
 import statistics
 from dataclasses import dataclass
+from typing import Literal
 
 from replenishment.math_ import normal_quantile
 from replenishment.timeseries import TimeSeries
@@ -32,7 +33,11 @@ def _actual_values(actuals: TimeSeries, period: int) -> list[float]:
 
 @dataclass(frozen=True)
 class KingsFormulaSafetyStock:
-    """SS = z_alpha * sqrt(L * std_demand^2 + mean_demand^2 * std_lead_time^2).
+    """SS = z_alpha * sqrt(L * std_demand^2 + mean_demand^2 * std_lead_time^2),
+    L = lead_time + horizon (the full protection window -- see
+    SqrtHorizonSafetyStock, which ReplenishmentPolicy calls with the exact
+    same lead_time/horizon pair; scaling by lead_time alone under-covers by
+    the review-period portion of the window whenever horizon > 0).
 
     Assumes demand-lead_time independence, serially uncorrelated demand.
     std_lead_time_periods defaults to 0.0 since ReplenishmentPolicy.lead_time
@@ -59,7 +64,8 @@ class KingsFormulaSafetyStock:
         std_d = statistics.stdev(values)
         z_alpha = normal_quantile(self.target_service_level)
 
-        variance = lead_time * std_d ** 2 + mean_d ** 2 * self.std_lead_time_periods ** 2
+        protection = lead_time + horizon
+        variance = protection * std_d ** 2 + mean_d ** 2 * self.std_lead_time_periods ** 2
         return z_alpha * math.sqrt(max(variance, 0.0))
 
 
@@ -85,11 +91,23 @@ class CompoundPoissonSafetyStock:
     events/period, Y ~ gamma-shaped size distribution (method-of-moments
     fit from history). Simulation-based (transparent, traceable) rather
     than a saddle-point approximation.
+
+    Protection window is lead_time + horizon (matches SqrtHorizonSafetyStock
+    and how ReplenishmentPolicy actually calls every strategy) -- scaling by
+    lead_time alone under-covers by the review-period portion of the window
+    whenever horizon > 0; this was a real bug here until fixed alongside
+    NegativeBinomialSafetyStock (2026-09-02).
+
+    seed defaults to 0, not None: a shared-library default that draws fresh
+    OS entropy on every call makes every caller's results non-reproducible
+    by default, which is the wrong default for a policy-simulation library
+    where "rerun the same backtest, get the same numbers" is an expected
+    property. Pass seed=None explicitly for fresh randomness each call.
     """
 
     target_service_level: float = 0.95
     n_simulations: int = 5000
-    seed: int | None = None
+    seed: int | None = 0
 
     def __post_init__(self) -> None:
         if not 0.0 < self.target_service_level < 1.0:
@@ -100,7 +118,8 @@ class CompoundPoissonSafetyStock:
     def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
         actuals = _require_actuals(actuals)
         values = _actual_values(actuals, period)
-        if not values or lead_time <= 0:
+        protection = lead_time + horizon
+        if not values or protection <= 0:
             return 0.0
 
         nonzero = [v for v in values if v > 0]
@@ -111,7 +130,7 @@ class CompoundPoissonSafetyStock:
         size_mean = statistics.fmean(nonzero)
         size_std = statistics.stdev(nonzero) if len(nonzero) > 1 else 0.0
 
-        rate = lead_time * lambda_rate
+        rate = protection * lambda_rate
         if rate <= 0 or size_mean <= 0:
             return 0.0
 
@@ -131,3 +150,102 @@ class CompoundPoissonSafetyStock:
         quantile_value = ltds[idx]
         mean_ltd = statistics.fmean(ltds)
         return max(quantile_value - mean_ltd, 0.0)
+
+
+class NegativeBinomialRangeError(ValueError):
+    """Raised when the demand history isn't overdispersed enough
+    (variance <= mean) for a valid negative-binomial fit, and the strategy
+    was not told to fall back to zero."""
+
+    def __init__(self, *, mean_d: float, var_d: float):
+        self.mean_d = mean_d
+        self.var_d = var_d
+        super().__init__(
+            f"Negative-binomial fit requires overdispersed demand "
+            f"(variance > mean); got mean={mean_d:.4f}, variance={var_d:.4f}. "
+            f"Pass on_underdispersion='zero' to treat this as needing no "
+            f"safety stock instead of raising."
+        )
+
+
+def _nb_quantile(target: float, R: float, p: float) -> float:
+    """Smallest k with CDF(k) >= target for NB(R, p) (R = shape, p = success
+    probability; mean = R(1-p)/p). Walks forward from k=0 accumulating pmf
+    mass via the standard ratio recurrence pmf(k) = pmf(k-1) * (k-1+R)/k *
+    (1-p) -- O(1) work per step, no lgamma calls in the loop, exact (no
+    Monte Carlo, no normal approximation)."""
+    if not 0.0 < target < 1.0:
+        raise ValueError("target must be in (0, 1).")
+    cdf = 0.0
+    pmf = math.exp(R * math.log(p))  # pmf(0) = p**R
+    k = 0
+    max_iterations = 1_000_000
+    while True:
+        cdf += pmf
+        if cdf >= target:
+            return float(k)
+        k += 1
+        if k > max_iterations:
+            raise RuntimeError(
+                f"NB quantile search did not converge within {max_iterations} "
+                f"steps (R={R}, p={p}, target={target}, cdf={cdf}) -- "
+                f"unexpected for realistic demand/target combinations."
+            )
+        pmf *= (k - 1 + R) / k * (1 - p)
+
+
+@dataclass(frozen=True)
+class NegativeBinomialSafetyStock:
+    """SS = quantile(NB(L*r, p)) - mean(NB(L*r, p)), for overdispersed
+    (variance > mean) demand -- the standard closed-form model for count
+    data with more variance than a pure Poisson process would produce
+    (exactly the condition Syntetos-Boylan's CV^2 > 0.49 threshold checks
+    for "erratic"/"lumpy" classification).
+
+    Unlike CompoundPoissonSafetyStock's Monte Carlo simulation of a
+    Poisson-arrival/gamma-size compound process, this fits ONE distribution
+    directly to the raw per-period demand history (mean/variance, zeros
+    included -- not just nonzero events) via method of moments, and
+    aggregates to the full protection window L = lead_time + horizon
+    exactly: a sum of L i.i.d. NB(r, p) variables is itself NB(L*r, p) (a
+    known convolution/stability property, not an approximation). The
+    quantile is found by a deterministic discrete search (_nb_quantile) --
+    no RNG, no simulation, exactly reproducible and cheaper than 5,000
+    Monte Carlo draws.
+    """
+
+    target_service_level: float
+    on_underdispersion: Literal["raise", "zero"] = "raise"
+
+    def __post_init__(self) -> None:
+        if not 0.0 < self.target_service_level < 1.0:
+            raise ValueError("target_service_level must be in (0, 1).")
+        if self.on_underdispersion not in ("raise", "zero"):
+            raise ValueError("on_underdispersion must be 'raise' or 'zero'.")
+
+    def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
+        actuals = _require_actuals(actuals)
+        values = _actual_values(actuals, period)
+        if len(values) < 2:
+            return 0.0
+
+        mean_d = statistics.fmean(values)
+        if mean_d <= 0:
+            return 0.0
+        var_d = statistics.variance(values)
+        if var_d <= mean_d:
+            if self.on_underdispersion == "zero":
+                return 0.0
+            raise NegativeBinomialRangeError(mean_d=mean_d, var_d=var_d)
+
+        protection = lead_time + horizon
+        if protection <= 0:
+            return 0.0
+
+        p = mean_d / var_d
+        r = mean_d ** 2 / (var_d - mean_d)
+        R = protection * r
+
+        mean_ltd = R * (1 - p) / p
+        quantile = _nb_quantile(self.target_service_level, R, p)
+        return max(quantile - mean_ltd, 0.0)
