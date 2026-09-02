@@ -212,21 +212,33 @@ class NegativeBinomialSafetyStock:
     quantile is found by a deterministic discrete search (_nb_quantile) --
     no RNG, no simulation, exactly reproducible and cheaper than 5,000
     Monte Carlo draws.
+
+    min_periods guards against a small-sample false negative: with very few
+    observations, variance can coincidentally equal or undercut the mean
+    even for a genuinely overdispersed item (e.g. exactly 2 equal values
+    early in a backtest) -- that is a "not enough signal yet" condition,
+    the same cold-start story every other strategy here already handles by
+    returning 0.0, not a real property of the item's demand. Below
+    min_periods, this returns 0.0 regardless of on_underdispersion; above
+    it, an underdispersion finding is trusted as real.
     """
 
     target_service_level: float
     on_underdispersion: Literal["raise", "zero"] = "raise"
+    min_periods: int = 5
 
     def __post_init__(self) -> None:
         if not 0.0 < self.target_service_level < 1.0:
             raise ValueError("target_service_level must be in (0, 1).")
         if self.on_underdispersion not in ("raise", "zero"):
             raise ValueError("on_underdispersion must be 'raise' or 'zero'.")
+        if self.min_periods < 2:
+            raise ValueError("min_periods must be at least 2.")
 
     def compute(self, *, forecast, actuals, period, lead_time, horizon, service_level_factor) -> float:
         actuals = _require_actuals(actuals)
         values = _actual_values(actuals, period)
-        if len(values) < 2:
+        if len(values) < self.min_periods:
             return 0.0
 
         mean_d = statistics.fmean(values)

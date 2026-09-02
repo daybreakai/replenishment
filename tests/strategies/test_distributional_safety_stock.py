@@ -223,6 +223,19 @@ def test_negative_binomial_rejects_bad_on_underdispersion():
         NegativeBinomialSafetyStock(target_service_level=0.95, on_underdispersion="bogus")
 
 
+def test_negative_binomial_small_sample_underdispersion_returns_zero_not_raise():
+    """Regression guard: 2 equal observations trivially look underdispersed
+    (variance=0) but that's a small-sample artifact, not a real property of
+    the item -- must return 0.0 (cold-start behavior), never raise, below
+    min_periods. This is the exact shape that crashed a real backtest run
+    before this guard existed."""
+    two_equal = TimeSeries.from_values([8, 8])
+    strategy = NegativeBinomialSafetyStock(target_service_level=0.95)
+    ss = strategy.compute(forecast=FORECAST, actuals=two_equal, period=2,
+                         lead_time=1, horizon=2, service_level_factor=1.0)
+    assert ss == 0.0
+
+
 def test_negative_binomial_zero_at_period_zero_no_history():
     strategy = NegativeBinomialSafetyStock(target_service_level=0.95)
     ss = strategy.compute(forecast=FORECAST, actuals=NB_ACTUALS, period=0,
