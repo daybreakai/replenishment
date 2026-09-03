@@ -30,13 +30,37 @@ def test_every_release_clears_minimum_or_exhausts_assortment():
         factor=1.65, horizon=2, mode="rop_flat", review_period=1,
         minimum_value=50.0, unit_cost=unit_cost, wait_cap_periods=3,
     )
+    n_items = len(port.unique_ids)
     for released, value in _released_value_by_period(res, unit_cost):
         any_released = any(q > 0 for q in released.values())
         if not any_released:
             continue
         cleared = value >= 50.0
-        exhausted = all(q > 0 for q in released.values())  # every item in the portfolio released
+        # exhausted the assortment = literally every item in the portfolio released
+        # this period, not just "whatever released happened to be positive"
+        exhausted = sum(1 for q in released.values() if q > 0) == n_items
         assert cleared or exhausted, (released, value)
+
+
+def test_unreachable_minimum_always_exhausts_the_whole_assortment():
+    """A minimum no combination of items can ever clear forces every
+    wait-cap release to pull in literally every item -- proves the top-up
+    loop doesn't stop early while candidates remain, not just that release
+    happened to include only positive quantities (the weaker, tautological
+    check the test above also makes)."""
+    rows = _rows(n=5, periods=30)
+    port = Portfolio(rows)
+    unit_cost = dict.fromkeys(port.unique_ids, 10.0)
+    res = port.simulate_pooled(
+        factor=1.65, horizon=2, mode="rop_flat", review_period=1,
+        minimum_value=1e9, unit_cost=unit_cost, wait_cap_periods=1,
+    )
+    n_items = len(port.unique_ids)
+    releases = [r for r, _ in _released_value_by_period(res, unit_cost)
+                if any(q > 0 for q in r.values())]
+    assert releases  # the scenario actually produces releases to check
+    for released in releases:
+        assert sum(1 for q in released.values() if q > 0) == n_items, released
 
 
 def test_pooling_batches_orders_relative_to_unpooled_rop():
