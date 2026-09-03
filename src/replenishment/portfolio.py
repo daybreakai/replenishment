@@ -23,6 +23,7 @@ from replenishment.io_ import (
     build_point_forecast_article_configs_from_standard_rows,
     standard_simulation_rows_from_dataframe,
 )
+from replenishment.pooled import simulate_pooled_replenishment
 from replenishment.simulation import SimulationResult, SimulationSummary
 
 
@@ -164,3 +165,28 @@ class Portfolio:
         return PortfolioResult(
             {uid: cfg.simulate() for uid, cfg in self.configs(**knobs).items()}
         )
+
+    def simulate_pooled(
+        self,
+        *,
+        minimum_value: float,
+        unit_cost: Mapping[str, float],
+        wait_cap_periods: int,
+        weight_by_item: Mapping[str, float] | None = None,
+        minimum_weight: float | None = None,
+        minimum_logic: str = "or",
+        **knobs,
+    ) -> PortfolioResult:
+        """Same configs() knobs as simulate(), but every item's order
+        RELEASE is gated by a shared portfolio-wide $-value/weight minimum
+        instead of firing independently -- see replenishment.pooled for the
+        mechanism. `mode` must be "rop" or "rop_flat" (a reorder-point
+        trigger): pooling needs a "not yet triggered" state to rank
+        candidates against, which an order-up-to trigger doesn't have."""
+        configs = self.configs(**knobs)
+        return PortfolioResult(simulate_pooled_replenishment(
+            configs, minimum_value=minimum_value, unit_cost=dict(unit_cost),
+            wait_cap_periods=wait_cap_periods,
+            weight_by_item=dict(weight_by_item) if weight_by_item is not None else None,
+            minimum_weight=minimum_weight, minimum_logic=minimum_logic,
+        ))
