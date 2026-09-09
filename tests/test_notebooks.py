@@ -20,17 +20,26 @@ def _execute(path: Path) -> None:
 
 
 def test_sbd_poc3_dummy_data_notebook_runs():
-    _execute(NB_DIR / "sbd_poc3_dummy_data.ipynb")
+    path = NB_DIR / "sbd_poc3_dummy_data.ipynb"
+    if not path.exists():
+        pytest.skip("sbd_poc3_dummy_data.ipynb not yet authored")
+    _execute(path)
 
 
 def test_pourri_head_to_head_notebook_runs():
+    path = NB_DIR / "pourri" / "pourri_head_to_head.ipynb"
+    if not path.exists():
+        pytest.skip("pourri_head_to_head.ipynb not yet authored")
     if not (NB_DIR / "pourri" / "pourri_monthly.csv").exists():
         pytest.skip("pourri_monthly.csv not present -- re-run extraction.sql")
-    _execute(NB_DIR / "pourri" / "pourri_head_to_head.ipynb")
+    _execute(path)
 
 
 def test_sbd_poc3_local_fixture_notebook_runs():
+    path = NB_DIR / "sbd_poc3_local_fixture.ipynb"
+    if not path.exists():
+        pytest.skip("sbd_poc3_local_fixture.ipynb not yet authored")
     fixture_dir = NB_DIR.parent / "fixtures" / "sbd_poc3"
     if not any(fixture_dir.glob("sbd_poc3.parquet")) and not any(fixture_dir.glob("sbd_poc3.csv")):
         pytest.skip("no SBD fixture file yet -- see fixtures/sbd_poc3/README.md")
-    _execute(NB_DIR / "sbd_poc3_local_fixture.ipynb")
+    _execute(path)

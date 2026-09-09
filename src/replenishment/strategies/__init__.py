@@ -12,8 +12,9 @@ from replenishment.strategies.distributional_safety_stock import (
     NegativeBinomialSafetyStock, NegativeBinomialRangeError,
 )
 from replenishment.strategies.order_trigger import (
-    FlatForecastOrderUpToTrigger, OrderTrigger, OrderUpToTrigger, ReorderPointTrigger,
+    FlatForecastOrderUpToTrigger, FlatReorderPointTrigger, OrderTrigger, OrderUpToTrigger, ReorderPointTrigger,
 )
+from replenishment.strategies.registry import describe, list_order_triggers, list_safety_stock_strategies
 
 __all__ = [
     "SafetyStockStrategy", "SqrtHorizonSafetyStock", "KRmseSafetyStock",
@@ -23,6 +24,7 @@ __all__ = [
     "DemandBufferDecorator", "KingsFormulaSafetyStock",
     "CompoundPoissonSafetyStock", "NegativeBinomialSafetyStock",
     "NegativeBinomialRangeError",
-    "FlatForecastOrderUpToTrigger", "OrderTrigger", "OrderUpToTrigger",
-    "ReorderPointTrigger",
+    "FlatForecastOrderUpToTrigger", "FlatReorderPointTrigger", "OrderTrigger",
+    "OrderUpToTrigger", "ReorderPointTrigger",
+    "describe", "list_order_triggers", "list_safety_stock_strategies",
 ]

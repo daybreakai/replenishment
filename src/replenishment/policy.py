@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from replenishment.strategies.distributional_safety_stock import (
+    CompoundPoissonSafetyStock, KingsFormulaSafetyStock, NegativeBinomialSafetyStock,
+)
 from replenishment.strategies.multiplier import MultiplierSafetyStockStrategy, NullSafetyStockStrategy
 from replenishment.strategies.order_trigger import OrderTrigger, OrderUpToTrigger, ReorderPointTrigger
 from replenishment.strategies.safety_stock import (
@@ -12,7 +15,15 @@ from replenishment.strategies.safety_stock import (
 )
 from replenishment.timeseries import TimeSeries
 
-_REQUIRES_ACTUALS = (SqrtHorizonSafetyStock, KRmseSafetyStock, KMaeSafetyStock, FillRateSafetyStock)
+# KingsFormulaSafetyStock/CompoundPoissonSafetyStock/NegativeBinomialSafetyStock also
+# require actuals (their .compute() raises ValueError without them) but were missing
+# here, so building a policy with one of them and no actuals used to fail late, inside
+# simulate_replenishment, instead of immediately in __post_init__ like every other
+# actuals-requiring strategy.
+_REQUIRES_ACTUALS = (
+    SqrtHorizonSafetyStock, KRmseSafetyStock, KMaeSafetyStock, FillRateSafetyStock,
+    KingsFormulaSafetyStock, CompoundPoissonSafetyStock, NegativeBinomialSafetyStock,
+)
 
 
 def round_to_moq(qty: int, moq: int) -> int:
