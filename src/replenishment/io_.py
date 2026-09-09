@@ -42,8 +42,13 @@ from replenishment.policy import ReplenishmentPolicy
 from replenishment.simulation import SimulationResult, simulate_replenishment
 from replenishment.strategies.multiplier import NullSafetyStockStrategy
 from replenishment.strategies.order_trigger import (
-    FlatForecastOrderUpToTrigger, OrderUpToTrigger, ReorderPointTrigger)
+    FlatForecastOrderUpToTrigger, FlatReorderPointTrigger, OrderUpToTrigger,
+    ReorderPointTrigger)
+from replenishment.strategies.distributional_safety_stock import (
+    CompoundPoissonSafetyStock, NegativeBinomialSafetyStock,
+)
 from replenishment.strategies.safety_stock import (
+    FillRateSafetyStock,
     FixedErrorSafetyStock,
     KMaeSafetyStock,
     KRmseSafetyStock,
@@ -192,6 +197,25 @@ _SAFETY_STOCK_STRATEGIES = {
     "sqrt_horizon": SqrtHorizonSafetyStock,
     "k_rmse": KRmseSafetyStock,
     "k_mae": KMaeSafetyStock,
+    "fill_rate": FillRateSafetyStock,
+    "compound_poisson": CompoundPoissonSafetyStock,
+    "negative_binomial": NegativeBinomialSafetyStock,
+}
+
+# Every strategy above takes exactly one calibratable scalar in its
+# constructor, but not the same *name* -- the k_*/sqrt_horizon strategies
+# take an error multiplier (factor), while fill_rate/compound_poisson take
+# a probability (target_fill_rate / target_service_level) with a value
+# range and business meaning. `factor` stays the generic name callers pass
+# (matches Portfolio.simulate(factor=...)); this maps it to the right
+# constructor kwarg per method.
+_FACTOR_KWARG = {
+    "sqrt_horizon": "factor",
+    "k_rmse": "factor",
+    "k_mae": "factor",
+    "fill_rate": "target_fill_rate",
+    "compound_poisson": "target_service_level",
+    "negative_binomial": "target_service_level",
 }
 
 
@@ -199,14 +223,16 @@ def _safety_stock_builder_for_method(
     method: str | None, factor: float, fixed_error: float | None = None
 ):
     """Map janrth's safety_stock_method string onto the new strategy
-    classes. Only the three canonical method names are supported (per
-    Task 11's brief) -- janrth's extra aliases ("legacy", "raw_rmse",
-    "k*mae", ...) are not re-created here.
+    classes. janrth's extra aliases ("legacy", "raw_rmse", "k*mae", ...)
+    are not re-created here.
 
     When fixed_error is given, the method still selects the *shape*
     (sqrt_horizon -> horizon-scaled, k_rmse/k_mae -> flat) but the error
     value is the caller's, via FixedErrorSafetyStock -- for callers with
-    real pre-window error history (e.g. causal CV residuals)."""
+    real pre-window error history (e.g. causal CV residuals). Only the
+    error-scaled methods (sqrt_horizon/k_rmse/k_mae) support this --
+    fill_rate/compound_poisson compute their buffer from raw demand
+    statistics, not a forecast-error series, so there's no error to fix."""
     normalized = (method or "sqrt_horizon").strip().lower()
     strategy_cls = _SAFETY_STOCK_STRATEGIES.get(normalized)
     if strategy_cls is None:
@@ -214,11 +240,27 @@ def _safety_stock_builder_for_method(
             f"safety_stock_method must be one of {sorted(_SAFETY_STOCK_STRATEGIES)}, got {method!r}."
         )
     if fixed_error is not None:
+        if _FACTOR_KWARG[normalized] != "factor":
+            raise ValueError(
+                f"safety_stock_method={normalized!r} has no forecast-error series "
+                f"to fix -- fixed_error only applies to sqrt_horizon/k_rmse/k_mae."
+            )
         scale = normalized == "sqrt_horizon"
         return lambda: FixedErrorSafetyStock(
             error=fixed_error, factor=factor, scale_by_horizon=scale
         )
-    return lambda: strategy_cls(factor=factor)
+    if normalized == "negative_binomial":
+        # NegativeBinomialSafetyStock's own default (on_underdispersion=
+        # "raise") is right for a single direct caller who wants to know
+        # immediately that an item doesn't fit the overdispersion
+        # assumption. This builder feeds a portfolio-wide sweep across
+        # potentially hundreds of items instead, where one non-overdispersed
+        # item (a genuinely steady/low-variance SKU is a real, not rare,
+        # case) shouldn't abort the whole run -- degrade to "no computed
+        # buffer for this item" instead, matching how the RMSE-based
+        # methods already degrade to zero for a zero-error item.
+        return lambda: strategy_cls(target_service_level=factor, on_underdispersion="zero")
+    return lambda: strategy_cls(**{_FACTOR_KWARG[normalized]: factor})
 
 
 def _guard_service_level_mode(mode_value: str | None) -> None:
@@ -820,13 +862,15 @@ def build_point_forecast_article_configs(
         factor = _resolve_value(service_level_factor, unique_id, "service_level_factor")
         if policy_mode == "rop":
             trigger = ReorderPointTrigger()
+        elif policy_mode == "rop_flat":
+            trigger = FlatReorderPointTrigger()
         elif policy_mode == "base_stock":
             trigger = OrderUpToTrigger()
         elif policy_mode == "base_stock_flat":
             trigger = FlatForecastOrderUpToTrigger()
         else:
             raise ValueError(
-                "policy_mode must be 'base_stock', 'base_stock_flat', or 'rop'.")
+                "policy_mode must be 'base_stock', 'base_stock_flat', 'rop', or 'rop_flat'.")
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),
@@ -1004,13 +1048,15 @@ def build_point_forecast_article_configs_from_standard_rows(
         article_fixed_error = _resolve_optional_value(fixed_error, unique_id, "fixed_error")
         if policy_mode == "rop":
             trigger = ReorderPointTrigger()
+        elif policy_mode == "rop_flat":
+            trigger = FlatReorderPointTrigger()
         elif policy_mode == "base_stock":
             trigger = OrderUpToTrigger()
         elif policy_mode == "base_stock_flat":
             trigger = FlatForecastOrderUpToTrigger()
         else:
             raise ValueError(
-                "policy_mode must be 'base_stock', 'base_stock_flat', or 'rop'.")
+                "policy_mode must be 'base_stock', 'base_stock_flat', 'rop', or 'rop_flat'.")
         policy = ReplenishmentPolicy(
             forecast=TimeSeries.from_values(forecast),
             actuals=TimeSeries.from_values(actuals),

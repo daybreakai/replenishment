@@ -53,14 +53,58 @@ class FlatForecastOrderUpToTrigger:
 
 @dataclass(frozen=True)
 class ReorderPointTrigger:
-    def order_quantity(self, *, inventory_position, period, review_period, forecast, safety_stock, lead_time, forecast_horizon) -> int:
-        if review_period > 1 and period % review_period != 0:
-            return 0
+    def status(self, *, period, forecast, safety_stock, lead_time, forecast_horizon) -> tuple[float, float]:
+        """(reorder_point, order_up_to_target) at `period`, independent of
+        whether inventory_position has actually crossed reorder_point yet --
+        callers that need to know how CLOSE an item is to triggering (e.g.
+        pooled/joint replenishment ranking not-yet-triggered items) use
+        this; order_quantity uses it too, for one formula in one place."""
         lead_horizon = max(0, lead_time)
         lead_demand = forecast.sum_over(period + 1, lead_horizon) if lead_horizon > 0 else 0
         cycle_stock = forecast.sum_over(period + 1 + lead_horizon, forecast_horizon)
         reorder_point = lead_demand + safety_stock
-        order_up_to = reorder_point + cycle_stock
+        return reorder_point, reorder_point + cycle_stock
+
+    def order_quantity(self, *, inventory_position, period, review_period, forecast, safety_stock, lead_time, forecast_horizon) -> int:
+        if review_period > 1 and period % review_period != 0:
+            return 0
+        reorder_point, order_up_to = self.status(
+            period=period, forecast=forecast, safety_stock=safety_stock,
+            lead_time=lead_time, forecast_horizon=forecast_horizon)
+        if inventory_position <= reorder_point:
+            return max(0, math.ceil(order_up_to - inventory_position))
+        return 0
+
+
+@dataclass(frozen=True)
+class FlatReorderPointTrigger:
+    """Reorder-point trigger with a FLAT forecast target -- the same fix
+    FlatForecastOrderUpToTrigger applies to OrderUpToTrigger, applied here
+    instead: ReorderPointTrigger sums forecast[period+1 .. period+lead_time]
+    for lead_demand and forecast[period+1+lead_time .. +forecast_horizon]
+    for cycle_stock, which leaks future demand into both the reorder point
+    and the order-up-to target when the forecast series is a rolling
+    one-step-ahead CV series (see FlatForecastOrderUpToTrigger's docstring
+    for the full rationale). This trigger uses only forecast[period + 1] --
+    the freshest value available at decision time -- in place of every
+    forecast.sum_over(...) call; the reorder-point decision logic (only
+    order when inventory_position <= reorder_point) is unchanged."""
+
+    def status(self, *, period, forecast, safety_stock, lead_time, forecast_horizon) -> tuple[float, float]:
+        """(reorder_point, order_up_to_target) -- see ReorderPointTrigger.status."""
+        flat_forecast = forecast.value_at(period + 1)
+        lead_horizon = max(0, lead_time)
+        lead_demand = flat_forecast * lead_horizon
+        cycle_stock = flat_forecast * forecast_horizon
+        reorder_point = lead_demand + safety_stock
+        return reorder_point, reorder_point + cycle_stock
+
+    def order_quantity(self, *, inventory_position, period, review_period, forecast, safety_stock, lead_time, forecast_horizon) -> int:
+        if review_period > 1 and period % review_period != 0:
+            return 0
+        reorder_point, order_up_to = self.status(
+            period=period, forecast=forecast, safety_stock=safety_stock,
+            lead_time=lead_time, forecast_horizon=forecast_horizon)
         if inventory_position <= reorder_point:
             return max(0, math.ceil(order_up_to - inventory_position))
         return 0

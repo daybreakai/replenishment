@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from replenishment.strategies.distributional_safety_stock import (
+    CompoundPoissonSafetyStock, KingsFormulaSafetyStock, NegativeBinomialSafetyStock,
+)
 from replenishment.strategies.multiplier import MultiplierSafetyStockStrategy, NullSafetyStockStrategy
 from replenishment.strategies.order_trigger import OrderTrigger, OrderUpToTrigger, ReorderPointTrigger
 from replenishment.strategies.safety_stock import (
@@ -12,7 +15,24 @@ from replenishment.strategies.safety_stock import (
 )
 from replenishment.timeseries import TimeSeries
 
-_REQUIRES_ACTUALS = (SqrtHorizonSafetyStock, KRmseSafetyStock, KMaeSafetyStock, FillRateSafetyStock)
+# KingsFormulaSafetyStock/CompoundPoissonSafetyStock/NegativeBinomialSafetyStock also
+# require actuals (their .compute() raises ValueError without them) but were missing
+# here, so building a policy with one of them and no actuals used to fail late, inside
+# simulate_replenishment, instead of immediately in __post_init__ like every other
+# actuals-requiring strategy.
+_REQUIRES_ACTUALS = (
+    SqrtHorizonSafetyStock, KRmseSafetyStock, KMaeSafetyStock, FillRateSafetyStock,
+    KingsFormulaSafetyStock, CompoundPoissonSafetyStock, NegativeBinomialSafetyStock,
+)
+
+
+def round_to_moq(qty: int, moq: int) -> int:
+    """A positive order rounds UP to the nearest multiple of moq (pack-size
+    semantics: "must buy 12" means 12, 24, 36 -- not 13); a non-positive
+    quantity ("don't order") is never turned into one."""
+    if qty <= 0:
+        return 0
+    return ((qty + moq - 1) // moq) * moq
 
 
 def _requires_actuals(strategy) -> bool:
@@ -54,22 +74,36 @@ class ReplenishmentPolicy:
             )
 
     def order_quantity_for(self, state) -> int:
-        safety_stock = self.safety_stock.compute(
-            forecast=self.forecast, actuals=self.actuals, period=state.period,
-            lead_time=self.lead_time, horizon=self.forecast_horizon, service_level_factor=1.0,
-        )
         qty = self.trigger.order_quantity(
             inventory_position=state.inventory_position, period=state.period,
             review_period=self.review_period, forecast=self.forecast,
-            safety_stock=safety_stock, lead_time=self.lead_time, forecast_horizon=self.forecast_horizon,
+            safety_stock=self._safety_stock_at(state.period),
+            lead_time=self.lead_time, forecast_horizon=self.forecast_horizon,
         )
-        # MoQ rounds a positive order UP to the nearest multiple of moq
-        # (pack-size semantics: "must buy 12" means 12, 24, 36 — not 13).
-        # A "don't order" decision (review-period gating, position at/above
-        # target) is never turned into an order.
-        if qty > 0:
-            return ((qty + self.moq - 1) // self.moq) * self.moq
-        return qty
+        return round_to_moq(qty, self.moq)
+
+    def status(self, state) -> tuple[float, float]:
+        """(reorder_point, order_up_to_target) at `state`, independent of
+        whether the trigger has actually fired -- for callers that need to
+        know how close an item is to triggering without deciding whether to
+        order (e.g. pooled/joint replenishment ranking not-yet-triggered
+        items for top-up). Only reorder-point-family triggers expose this;
+        an order-up-to trigger has no "not yet triggered" state to describe."""
+        if not hasattr(self.trigger, "status"):
+            raise AttributeError(
+                f"{type(self.trigger).__name__} has no reorder-point status — "
+                f"only ReorderPointTrigger/FlatReorderPointTrigger do")
+        return self.trigger.status(
+            period=state.period, forecast=self.forecast,
+            safety_stock=self._safety_stock_at(state.period),
+            lead_time=self.lead_time, forecast_horizon=self.forecast_horizon,
+        )
+
+    def _safety_stock_at(self, period: int) -> float:
+        return self.safety_stock.compute(
+            forecast=self.forecast, actuals=self.actuals, period=period,
+            lead_time=self.lead_time, horizon=self.forecast_horizon, service_level_factor=1.0,
+        )
 
     @classmethod
     def order_up_to(cls, *, forecast: TimeSeries, safety_stock, actuals: TimeSeries | None = None,
