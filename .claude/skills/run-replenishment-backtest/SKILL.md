@@ -22,12 +22,17 @@ yet.
   copy their pattern): `notebooks/`
 - Strategy/trigger discovery: `replenishment.strategies.list_safety_stock_strategies()`,
   `list_order_triggers()`, `describe(name)`
-- Results log: `experiments/results.jsonl` (repo root, git-committed) —
-  append-only, one JSON line per run. `backtest.py` auto-warns when a run
-  repeats an already-logged (strategy, params, trigger, data) combo. Run
-  `scripts/history.py` to browse past runs, or `scripts/history.py --diff
-  <strategy_a> <strategy_b>` to compare two strategies' latest logged runs
-  directly (config + fill_rate/total_cost deltas).
+- Results log: `experiments/results/<customer>/results.jsonl` (repo root,
+  git-committed) — append-only, one JSON line per run, partitioned by
+  `--customer` (omit it for `experiments/results/_unscoped/results.jsonl`,
+  e.g. a synthetic sanity check not tied to a real client). Same partitioning
+  `propose-strategy-space`'s `experiments/strategy_space_decisions/<customer>/`
+  and `segment-inventory-items`'s `experiments/segmentation_runs/<customer>/`
+  use. `backtest.py` auto-warns when a run repeats an already-logged
+  (strategy, params, trigger, data) combo within that customer's log. Run
+  `scripts/history.py --customer <customer>` to browse past runs, or add
+  `--diff <strategy_a> <strategy_b>` to compare two strategies' latest logged
+  runs directly (config + fill_rate/total_cost deltas).
 
 ## Execution steps
 
@@ -71,9 +76,10 @@ yet.
    automatically add a `NullSafetyStockStrategy` (zero buffer) baseline row
    per distinct trigger used, and rank variants against it by `total_cost`
    with `fill_rate`/`total_cost` deltas shown — pass `--no-baseline` to skip
-   it. Every run (single or sweep) appends a line to
-   `experiments/results.jsonl`; pass `--no-log` for a throwaway run, or
-   `--log-path` to redirect it.
+   it. Every run (single or sweep) appends a line to that customer's results
+   log (pass `--customer`, same as `propose-strategy-space`/
+   `segment-inventory-items` — never inferred, ask if not given); pass
+   `--no-log` for a throwaway run, or `--log-path` to redirect it entirely.
 5. **MOQ/lead_time/review_period are dataset properties, not sweep axes.**
    These vary per SKU and are usually already columns in the data — read
    them from a column instead of guessing one scalar for the whole run:

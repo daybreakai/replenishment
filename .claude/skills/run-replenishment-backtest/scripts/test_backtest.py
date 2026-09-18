@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent))
+import backtest as backtest_mod  # noqa: E402
 from backtest import _aggregate, _log_results, run_backtest, run_sweep  # noqa: E402
 
 
@@ -183,7 +184,32 @@ def test_unknown_forecast_field_is_rejected():
     raise AssertionError("expected ValueError for an unknown forecast_field")
 
 
+def test_main_rejects_bad_customer_before_running_backtest(monkeypatch):
+    def fail_run_backtest(args):
+        raise AssertionError("run_backtest must not be called when --customer fails validation")
+    monkeypatch.setattr(backtest_mod, "run_backtest", fail_run_backtest)
+
+    original_argv = sys.argv
+    sys.argv = [
+        "backtest.py", "--data", "synthetic", "--strategy", "KRmseSafetyStock",
+        "--params", "factor=1.65", "--customer", "../evil", "--no-log",
+    ]
+    try:
+        try:
+            backtest_mod.main()
+        except SystemExit as exc:
+            assert exc.code == 1
+            return
+        raise AssertionError("expected SystemExit for a bad --customer")
+    finally:
+        sys.argv = original_argv
+
+
 if __name__ == "__main__":
+    class _FakeMonkeypatch:
+        def setattr(self, obj, name, value):
+            setattr(obj, name, value)
+
     test_synthetic_backtest_runs_for_every_item()
     test_cost_breakdown_and_turnover_are_consistent()
     test_unknown_strategy_param_is_rejected()
@@ -196,4 +222,5 @@ if __name__ == "__main__":
     test_moq_and_moq_field_are_mutually_exclusive()
     test_forecast_field_reads_percentile_column()
     test_unknown_forecast_field_is_rejected()
+    test_main_rejects_bad_customer_before_running_backtest(_FakeMonkeypatch())
     print("ok")

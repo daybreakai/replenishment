@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_LOG_PATH = REPO_ROOT / "experiments" / "results.jsonl"
+sys.path.insert(0, str(Path(__file__).parent))
+from backtest import _resolve_log_path  # noqa: E402
 
 
 def _iter_rows(log_path: Path):
@@ -87,7 +88,8 @@ def diff_strategies(log_path: Path, strategy_a: str, strategy_b: str) -> None:
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--log-path", default=None, help="Override the results log path (default: experiments/results.jsonl at repo root)")
+    parser.add_argument("--customer", default=None, help="Read experiments/results/<customer>/results.jsonl; omit for experiments/results/_unscoped/results.jsonl")
+    parser.add_argument("--log-path", default=None, help="Override the results log path entirely (default: experiments/results/<customer or _unscoped>/results.jsonl at repo root)")
     parser.add_argument("--strategy", default=None, help="Only show runs of this safety-stock strategy")
     parser.add_argument("--limit", type=int, default=None, help="Only show the N most recent matching runs")
     parser.add_argument("--diff", nargs=2, metavar=("STRATEGY_A", "STRATEGY_B"),
@@ -97,7 +99,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_arg_parser().parse_args()
-    log_path = Path(args.log_path) if args.log_path else DEFAULT_LOG_PATH
+    log_path = _resolve_log_path(args)
     if args.diff:
         diff_strategies(log_path, args.diff[0], args.diff[1])
         return

@@ -2,10 +2,13 @@
 
 Manual lookup table — nothing here is called automatically.
 `replenishment.classification.classify_demand(history)` implements the same
-Syntetos-Boylan ADI/CV² thresholds this table is built from, but has zero
-callers anywhere in the codebase; use it by hand (`classify_demand(history)`)
-to get one of the four labels below, then pick a strategy family from this
-table and confirm its hyperparameters with `describe(name)`.
+Syntetos-Boylan ADI/CV² thresholds this table is built from -- called today
+by `propose-strategy-space/scripts/classify_items.py` and
+`segment-inventory-items/scripts/segmentation_strategies.py`, though nothing
+in *this* skill calls it automatically. Use it by hand
+(`classify_demand(history)`) to get one of the four labels below, then pick
+a strategy family from this table and confirm its hyperparameters with
+`describe(name)`.
 
 | Demand shape | ADI / CV² | Candidate strategies | Why |
 |---|---|---|---|
@@ -27,7 +30,12 @@ demand shape at all:
 `DemandBufferDecorator` wraps any of the above to add trend-chasing uplift
 when the current forecast is running above a reference baseline — layer it on
 top of whichever base strategy the table above suggests, it isn't a
-replacement for one.
+replacement for one. Its `wrapped` param needs an already-constructed
+strategy *instance*, which neither `backtest.py`'s scalar `--params` parsing
+nor a JSON `param_grid` can express — there's no CLI-driven path to this
+decorator through any skill today, only direct Python construction.
+`propose-strategy-space`'s validator rejects it outright as a top-level
+candidate rather than letting it fail obscurely at simulation time.
 
 `KingsFormulaSafetyStock` sits closest to the "smooth" row (assumes
 demand-lead_time independence, roughly normal demand) but additionally models

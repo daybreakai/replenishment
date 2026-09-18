@@ -1,8 +1,12 @@
+import csv
+import tempfile
+from pathlib import Path
+
 import pandas as pd
 from replenishment.io_ import (
     generate_standard_simulation_rows, standard_simulation_rows_to_dataframe,
     standard_simulation_rows_from_dataframe, split_standard_simulation_rows,
-    build_policy_from_standard_rows,
+    build_policy_from_standard_rows, load_standard_simulation_rows,
 )
 from replenishment.strategies.safety_stock import SqrtHorizonSafetyStock
 from replenishment.strategies.order_trigger import OrderUpToTrigger
@@ -27,6 +31,66 @@ def test_roundtrip_through_dataframe():
     assert isinstance(df, pd.DataFrame)
     roundtripped = standard_simulation_rows_from_dataframe(df, cutoff=df["ds"].max())
     assert len(roundtripped) == len(rows)
+
+
+_BASE_FIELDNAMES = [
+    "unique_id", "ds", "demand", "forecast", "actuals", "holding_cost_per_unit",
+    "stockout_cost_per_unit", "order_cost_per_order", "lead_time", "initial_on_hand",
+    "current_stock",
+]
+
+
+def _write_csv(path: Path, actuals_col: str = "actuals", lead_time_col: str = "lead_time") -> None:
+    fieldnames = [f if f not in ("actuals", "lead_time") else
+                  {"actuals": actuals_col, "lead_time": lead_time_col}[f]
+                  for f in _BASE_FIELDNAMES]
+    rows = [{
+        "unique_id": "A", "ds": "2024-01-01", "demand": 10, "forecast": 10,
+        actuals_col: 10, "holding_cost_per_unit": 1.0, "stockout_cost_per_unit": 5.0,
+        "order_cost_per_order": 0.0, lead_time_col: 3, "initial_on_hand": 20, "current_stock": 20,
+    }]
+    with path.open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_load_standard_simulation_rows_reads_csv_with_default_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "d.csv"
+        _write_csv(path)
+        rows = load_standard_simulation_rows(str(path))
+        assert len(rows) == 1
+        assert rows[0].actuals == 10
+        assert rows[0].lead_time == 3
+
+
+def test_load_standard_simulation_rows_honors_actuals_field_override():
+    # This is the exact drift this function exists to prevent: a renamed
+    # actuals column must resolve identically for every caller that passes
+    # actuals_field, not just the one that happened to test it first.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "d.csv"
+        _write_csv(path, actuals_col="actual_units")
+        rows = load_standard_simulation_rows(str(path), actuals_field="actual_units")
+        assert rows[0].actuals == 10
+
+
+def test_load_standard_simulation_rows_honors_lead_time_field_override():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "d.csv"
+        _write_csv(path, lead_time_col="supplier_lead_time")
+        rows = load_standard_simulation_rows(str(path), lead_time_field="supplier_lead_time")
+        assert rows[0].lead_time == 3
+
+
+def test_load_standard_simulation_rows_rejects_unsupported_extension():
+    try:
+        load_standard_simulation_rows("nope.txt")
+    except ValueError as exc:
+        assert "nope.txt" in str(exc)
+        return
+    raise AssertionError("expected ValueError for an unsupported extension")
 
 
 def test_article_config_builders_accept_per_item_moq():

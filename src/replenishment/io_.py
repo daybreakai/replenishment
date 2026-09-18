@@ -33,6 +33,7 @@ import csv
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import math
+from pathlib import Path
 import random
 import string
 import warnings
@@ -808,6 +809,40 @@ def iter_standard_simulation_rows_from_csv(
                 forecast_percentiles=forecast_percentiles,
                 is_forecast=is_forecast_value,
             )
+
+
+def load_standard_simulation_rows(
+    path: str,
+    *,
+    actuals_field: str | None = None,
+    initial_on_hand_field: str | None = None,
+    lead_time_field: str | None = None,
+) -> list[StandardSimulationRow]:
+    """Resolve a .csv or .parquet path into StandardSimulationRow objects,
+    with the same column-name overrides every StandardSimulationRow
+    consumer needs. Single source of truth for that resolution -- callers
+    (run-replenishment-backtest's backtest.py, propose-strategy-space's
+    classify_items.py) delegate here instead of each re-implementing the
+    csv/parquet branch, so their --actuals-field/--initial-on-hand-field/
+    --lead-time-field flags can never drift out of sync with each other or
+    with this module's own kwarg names.
+    """
+    field_overrides = {}
+    if actuals_field:
+        field_overrides["actuals_field"] = actuals_field
+    if initial_on_hand_field:
+        field_overrides["initial_on_hand_field"] = initial_on_hand_field
+    if lead_time_field:
+        field_overrides["lead_time_field"] = lead_time_field
+
+    suffix = Path(path).suffix
+    if suffix == ".csv":
+        return list(iter_standard_simulation_rows_from_csv(path, **field_overrides))
+    if suffix == ".parquet":
+        import pandas as pd
+
+        return standard_simulation_rows_from_dataframe(pd.read_parquet(path), **field_overrides)
+    raise ValueError(f"Unsupported path {path!r} (use a .csv or a .parquet path)")
 
 
 def build_point_forecast_article_configs(
