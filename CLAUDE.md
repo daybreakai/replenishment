@@ -78,6 +78,15 @@ Read/write via `io_.iter_standard_simulation_rows_from_csv`,
 `io_.standard_simulation_rows_from_dataframe`,
 `io_.standard_simulation_rows_to_dataframe`, `io_.write_standard_simulation_rows_to_csv`.
 
+For a `.csv`/`.parquet` **path** specifically (not a DataFrame you already
+have in memory), prefer `io_.load_standard_simulation_rows(path,
+actuals_field=..., initial_on_hand_field=..., lead_time_field=...)` over
+calling the two functions above directly -- it's the single place that
+branches on file extension and threads through column-name overrides, used
+by both the `run-replenishment-backtest` and `propose-strategy-space`
+skills so their `--actuals-field`/`--initial-on-hand-field`/
+`--lead-time-field` flags can't drift out of sync with each other.
+
 ## What NOT to use for new strategy work
 
 `io_.py`'s `_SAFETY_STOCK_STRATEGIES`/`_FACTOR_KWARG` and `Portfolio`
@@ -93,9 +102,15 @@ through them — construct the class directly (above) and build a
 
 ## Past backtest results
 
-`experiments/results.jsonl` (repo root, git-committed) is an append-only log
-of every `run-replenishment-backtest` skill invocation (single config or
-sweep) — one JSON line per run with a timestamp, the data source, and each
-row's strategy/params/trigger/fill_rate/total_cost. Read it directly or run
-`.claude/skills/run-replenishment-backtest/scripts/history.py` before
-re-running an expensive sweep that may already have been tried.
+`experiments/results/<customer>/results.jsonl` (repo root, git-committed;
+`experiments/results/_unscoped/results.jsonl` when no `--customer` was
+given) is an append-only log of every `run-replenishment-backtest`/
+`optimize-replenishment-cost` invocation (single config, sweep, or grid
+search) — one JSON line per run with a timestamp, the data source, and each
+row's strategy/params/trigger/fill_rate/total_cost. Same per-customer
+partitioning `propose-strategy-space`'s `experiments/strategy_space_decisions/`
+and `segment-inventory-items`'s `experiments/segmentation_runs/` use. Read a
+customer's log directly or run
+`.claude/skills/run-replenishment-backtest/scripts/history.py --customer
+<customer>` before re-running an expensive sweep that may already have been
+tried.

@@ -25,8 +25,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from replenishment.io_ import (  # noqa: E402
     StandardSimulationRow,
     generate_standard_simulation_rows,
-    iter_standard_simulation_rows_from_csv,
-    standard_simulation_rows_from_dataframe,
+    load_standard_simulation_rows,
 )
 from replenishment.policy import ReplenishmentPolicy  # noqa: E402
 from replenishment.simulation import simulate_replenishment  # noqa: E402
@@ -76,20 +75,15 @@ def _load_rows(args) -> list[StandardSimulationRow]:
             lead_time=args.lead_time if args.lead_time is not None else 1,
             seed=args.seed,
         )
-    field_overrides = {}
-    if args.actuals_field:
-        field_overrides["actuals_field"] = args.actuals_field
-    if args.initial_on_hand_field:
-        field_overrides["initial_on_hand_field"] = args.initial_on_hand_field
-    if args.lead_time_field:
-        field_overrides["lead_time_field"] = args.lead_time_field
-    path = Path(args.data)
-    if path.suffix == ".csv":
-        return list(iter_standard_simulation_rows_from_csv(str(path), **field_overrides))
-    if path.suffix == ".parquet":
-        import pandas as pd
-        return standard_simulation_rows_from_dataframe(pd.read_parquet(path), **field_overrides)
-    raise ValueError(f"Unsupported --data {args.data!r} (use 'synthetic', a .csv, or a .parquet path)")
+    try:
+        return load_standard_simulation_rows(
+            args.data, actuals_field=args.actuals_field,
+            initial_on_hand_field=args.initial_on_hand_field, lead_time_field=args.lead_time_field,
+        )
+    except ValueError as exc:
+        if str(exc).startswith("Unsupported path"):
+            raise ValueError(f"Unsupported --data {args.data!r} (use 'synthetic', a .csv, or a .parquet path)") from exc
+        raise
 
 
 @functools.lru_cache(maxsize=4)
@@ -443,6 +437,25 @@ def _print_sweep_report(outcomes: list[dict]) -> None:
             print(f"{outcome['strategy']} ({outcome['trigger']}): {len(outcome['errors'])} item(s) failed, e.g. {outcome['errors'][0]}")
 
 
+def _validate_customer(customer: str) -> None:
+    if not customer or customer in (".", "..") or "/" in customer or "\\" in customer:
+        raise ValueError(f"invalid --customer {customer!r} -- must be a plain name, no path separators")
+
+
+def _resolve_log_path(args) -> Path:
+    """experiments/results/<customer>/results.jsonl -- or experiments/results/_unscoped/
+    when no --customer is given (e.g. a synthetic sanity-check run not tied to a real
+    client). --log-path always wins over both. Shared by backtest.py, grid_search.py,
+    and history.py so they can't drift on where a run's log actually lives."""
+    if args.log_path:
+        return Path(args.log_path)
+    customer = getattr(args, "customer", None)
+    if customer:
+        _validate_customer(customer)
+        return REPO_ROOT / "experiments" / "results" / customer / "results.jsonl"
+    return REPO_ROOT / "experiments" / "results" / "_unscoped" / "results.jsonl"
+
+
 def _iter_logged_rows(log_path: Path):
     if not log_path.exists():
         return
@@ -460,7 +473,7 @@ def _warn_on_repeat_configs(outcomes: list[dict], args) -> None:
     (strategy, params, trigger, data_source) combo is already in the log,
     so a sweep doesn't silently re-run something already answered. Never
     blocks -- data or code may have changed since, so it's informational."""
-    log_path = Path(args.log_path) if args.log_path else REPO_ROOT / "experiments" / "results.jsonl"
+    log_path = _resolve_log_path(args)
     prior_rows = list(_iter_logged_rows(log_path))
     if not prior_rows:
         return
@@ -506,7 +519,7 @@ def _row_record(outcome: dict) -> dict:
 def _log_results(outcomes: list[dict], args) -> None:
     if args.no_log:
         return
-    log_path = Path(args.log_path) if args.log_path else REPO_ROOT / "experiments" / "results.jsonl"
+    log_path = _resolve_log_path(args)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -524,7 +537,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trigger", default=None, help="Order trigger class name (default: OrderUpToTrigger)")
     parser.add_argument("--configs", default=None, help="Path to a JSON file, or an inline JSON array, of {strategy, params, trigger} objects -- runs a sweep against the same dataset. Mutually exclusive with --strategy/--params/--trigger.")
     parser.add_argument("--no-baseline", action="store_true", help="Sweep mode only: skip the automatic NullSafetyStockStrategy baseline row")
-    parser.add_argument("--log-path", default=None, help="Override the results log path (default: experiments/results.jsonl at repo root)")
+    parser.add_argument("--customer", default=None, help="Partitions the results log at experiments/results/<customer>/results.jsonl; omit for experiments/results/_unscoped/results.jsonl. Never inferred -- ask if not given.")
+    parser.add_argument("--log-path", default=None, help="Override the results log path entirely (default: experiments/results/<customer or _unscoped>/results.jsonl at repo root)")
     parser.add_argument("--no-log", action="store_true", help="Skip appending this run to the results log")
     parser.add_argument("--data", required=True, help="'synthetic', a .csv path, or a .parquet path")
     parser.add_argument("--forecast-field", default=None, help="Which forecast to use in single-config mode: 'forecast' (default) or a forecast_percentiles key, e.g. 'p90'. In --configs mode, set this per-entry instead.")
@@ -564,6 +578,11 @@ def _validate_mode(args) -> None:
 def main() -> None:
     args = _build_arg_parser().parse_args()
     try:
+        # Validate --customer before running anything -- a bad customer name
+        # must never let a full backtest/sweep run first and fail only when
+        # it tries to log, wasting the run and leaving nothing logged for it.
+        if args.customer:
+            _validate_customer(args.customer)
         _validate_mode(args)
         if args.configs:
             outcomes = run_sweep(args)
