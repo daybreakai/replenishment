@@ -58,34 +58,47 @@ def _passes_constraints(outcome: dict, args) -> bool:
     return True
 
 
+def _vlog(verbose: bool, msg: str) -> None:
+    if verbose:
+        print(f"[verbose] {msg}", file=sys.stderr)
+
+
 def run_grid_search(args) -> dict:
+    verbose = getattr(args, "verbose", False)
     strategy_space = json.loads(Path(args.strategy_space).read_text())
     errors = validate_strategy_space(strategy_space)
     if errors:
         raise ValueError("strategy space failed validation: " + "; ".join(errors))
+    _vlog(verbose, f"strategy space validated: {len(strategy_space.get('candidates', []))} candidate(s)")
 
     configs = expand_candidates(strategy_space)
     if not configs:
         raise ValueError("strategy space produced zero configs -- check 'candidates'.")
+    _vlog(verbose, f"expanded to {len(configs)} config(s): {[(c['strategy'], c['params']) for c in configs]}")
 
     moq_by_id, review_period_by_id = backtest._resolve_field_overrides(args)
     rows = backtest._load_rows(args)
     if not rows:
         raise ValueError("No rows loaded.")
     grouped = backtest._group_by_unique_id(rows)
+    _vlog(verbose, f"loaded {len(rows)} row(s) across {len(grouped)} item(s)")
 
-    outcomes = [
-        backtest._run_one_config(
+    outcomes = []
+    for i, c in enumerate(configs, start=1):
+        _vlog(verbose, f"running config {i}/{len(configs)}: {c['strategy']}({backtest._format_params(c['params'])})/{c['trigger']}")
+        outcome = backtest._run_one_config(
             c["strategy"], c["params"], c["trigger"], grouped, args,
             moq_by_id=moq_by_id, review_period_by_id=review_period_by_id, forecast_field=c["forecast_field"],
         )
-        for c in configs
-    ]
+        agg = backtest._aggregate(outcome)
+        _vlog(verbose, f"  -> fill_rate={agg['mean_fill_rate']}, total_cost={agg['total_cost']}, errors={len(outcome['errors'])}")
+        outcomes.append(outcome)
     for outcome in outcomes:
         outcome["is_baseline"] = False
 
     survivors = [o for o in outcomes if _passes_constraints(o, args)]
     survivors.sort(key=lambda o: backtest._aggregate(o)["total_cost"])
+    _vlog(verbose, f"{len(survivors)}/{len(outcomes)} config(s) survived constraints")
     return {"outcomes": outcomes, "survivors": survivors, "n_configs": len(configs)}
 
 
@@ -172,6 +185,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--strategy-space", required=True, help="Path to a propose-strategy-space JSON output")
     parser.add_argument("--min-fill-rate", type=float, default=None, help="Constraint: minimum mean fill_rate to survive")
     parser.add_argument("--max-total-cost", type=float, default=None, help="Constraint: maximum total_cost to survive")
+    parser.add_argument("--verbose", action="store_true", help="Print each config's params and result to stderr as it runs, not just the final table")
     parser.add_argument("--top", type=int, default=5, help="How many survivors to print in the ranked table")
     return parser
 

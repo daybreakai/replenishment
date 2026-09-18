@@ -45,12 +45,23 @@ def _shipped_qty(r: dict) -> float:
     return float(qty) if qty is not None else 0.0
 
 
-def fetch_rows(catalog: str, schema: str, tables: list[str], profile: str) -> dict[str, list[dict]]:
+def _vlog(verbose: bool, msg: str) -> None:
+    if verbose:
+        print(f"[verbose] {msg}", file=sys.stderr)
+
+
+def fetch_rows(catalog: str, schema: str, tables: list[str], profile: str, verbose: bool = False) -> dict[str, list[dict]]:
     statements = build_pull_statements(catalog, schema, tables)
-    return {table: run_query(sql, profile) for table, sql in statements.items()}
+    rows_by_table = {}
+    for table, sql in statements.items():
+        _vlog(verbose, f"querying {table}: {sql}")
+        rows = run_query(sql, profile)
+        _vlog(verbose, f"{table} -> {len(rows)} row(s)")
+        rows_by_table[table] = rows
+    return rows_by_table
 
 
-def compute_segments(rows_by_table: dict[str, list[dict]], strategies: list[str]) -> list[dict]:
+def compute_segments(rows_by_table: dict[str, list[dict]], strategies: list[str], verbose: bool = False) -> list[dict]:
     shipments = rows_by_table["t_outbound_shipment"]
     demand_by_id: dict[str, list[float]] = defaultdict(list)
     for r in shipments:
@@ -66,6 +77,7 @@ def compute_segments(rows_by_table: dict[str, list[dict]], strategies: list[str]
             unit_cost_by_id[pid] = float(r["unit_cost"])
         if r.get("product_group_id") is not None:
             product_group_by_id[pid] = r["product_group_id"]
+    _vlog(verbose, f"{len(unit_cost_by_id)} item(s) have a usable unit_cost, {len(product_group_by_id)} have a product_group_id")
 
     # Hard rule: a revenue-based strategy must never silently drop or
     # price-fallback a shipped item -- catches BOTH a null unit_cost row
@@ -90,6 +102,8 @@ def compute_segments(rows_by_table: dict[str, list[dict]], strategies: list[str]
         revenue_periods_by_id[pid][_period_key(r.get("actual_ship_date"))] += _shipped_qty(r) * cost
     revenue_by_id = {pid: sum(periods.values()) for pid, periods in revenue_periods_by_id.items()}
     revenue_series_by_id = {pid: list(periods.values()) for pid, periods in revenue_periods_by_id.items()}
+    for pid, rev in sorted(revenue_by_id.items()):
+        _vlog(verbose, f"revenue[{pid}] = {rev:.2f} (unit_cost={unit_cost_by_id[pid]}, {len(revenue_series_by_id[pid])} period(s))")
 
     if _REVENUE_STRATEGIES & set(strategies):
         # Belt-and-suspenders: the check above should make this impossible.
@@ -101,8 +115,14 @@ def compute_segments(rows_by_table: dict[str, list[dict]], strategies: list[str]
         )
 
     adi_cv2_by_id = {pid: adi_cv2_class(hist) for pid, hist in demand_by_id.items()} if "adi_cv2" in strategies else {}
+    if adi_cv2_by_id:
+        _vlog(verbose, f"adi_cv2_class: {adi_cv2_by_id}")
     abc_by_id = abc_bucket(revenue_by_id) if {"abc_revenue", "abc_xyz_matrix"} & set(strategies) else {}
+    if abc_by_id:
+        _vlog(verbose, f"abc_class: {abc_by_id}")
     xyz_by_id = xyz_bucket(revenue_series_by_id) if {"xyz_variability", "abc_xyz_matrix"} & set(strategies) else {}
+    if xyz_by_id:
+        _vlog(verbose, f"xyz_class: {xyz_by_id}")
     matrix_by_id = abc_xyz_matrix(abc_by_id, xyz_by_id) if "abc_xyz_matrix" in strategies else {}
 
     abc_hierarchy_by_id = {}
@@ -124,7 +144,9 @@ def compute_segments(rows_by_table: dict[str, list[dict]], strategies: list[str]
         revenue_by_group: dict[str, float] = defaultdict(float)
         for pid, rev in revenue_by_id.items():
             revenue_by_group[_rollup_key(pid)] += rev
+        _vlog(verbose, f"rolled-up group revenue: {dict(revenue_by_group)}")
         bucket_by_group = abc_bucket(revenue_by_group)
+        _vlog(verbose, f"group -> bucket: {bucket_by_group}")
         abc_hierarchy_by_id = {pid: bucket_by_group[_rollup_key(pid)] for pid in revenue_by_id}
 
     run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -154,17 +176,21 @@ def run(args) -> tuple[list[dict], Path]:
     if errors:
         raise ValueError("; ".join(errors))
 
-    rows_by_table = fetch_rows(args.catalog, args.schema, args.tables, args.profile)
-    records = compute_segments(rows_by_table, args.strategies)
+    verbose = getattr(args, "verbose", False)
+    rows_by_table = fetch_rows(args.catalog, args.schema, args.tables, args.profile, verbose=verbose)
+    records = compute_segments(rows_by_table, args.strategies, verbose=verbose)
 
     pull_sql = format_pull_sql_for_audit(build_pull_statements(args.catalog, args.schema, args.tables))
     create_sql, insert_sql = build_write_back_sql(args.catalog, args.schema, records)
     audit_sql = pull_sql + "\n\n" + create_sql + (("\n\n" + insert_sql) if insert_sql else "")
     audit_path = write_audit_file(audit_sql, args.customer, Path(args.out_dir) if args.out_dir else None)
+    _vlog(verbose, f"audit SQL written -> {audit_path}")
 
     if not args.dry_run:
+        _vlog(verbose, "executing CREATE TABLE against Databricks")
         run_query(create_sql, args.profile)
         if insert_sql:
+            _vlog(verbose, "executing INSERT against Databricks")
             run_query(insert_sql, args.profile)
 
     return records, audit_path
@@ -180,6 +206,7 @@ def main() -> None:
     parser.add_argument("--tables", nargs="+", default=DEFAULT_TABLES, help=f"Tables to pull; default {DEFAULT_TABLES}")
     parser.add_argument("--dry-run", action="store_true", help="Write the audit SQL file but skip executing the write-back against Databricks")
     parser.add_argument("--out-dir", default=None, help="Override the audit-file base dir (default experiments/segmentation_runs)")
+    parser.add_argument("--verbose", action="store_true", help="Print each SQL query, row count, and intermediate per-item calculation to stderr as it happens")
     args = parser.parse_args()
     try:
         records, audit_path = run(args)
