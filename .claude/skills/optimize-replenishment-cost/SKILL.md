@@ -15,7 +15,8 @@ cheapest survivor. No new simulation engine -- `grid_search.py` reuses
 
 ## Constants
 
-- Databricks loader: `scripts/load_from_databricks.py`
+- Databricks loader (table is already `StandardSimulationRow`-shaped): `scripts/load_from_databricks.py`
+- Databricks loader (real client tables -- the common case): `scripts/derive_standard_rows.py`
 - Grid search + constraint filter: `scripts/grid_search.py`
 - Underlying sweep engine (reused, not duplicated):
   `../run-replenishment-backtest/scripts/backtest.py`
@@ -28,19 +29,40 @@ cheapest survivor. No new simulation engine -- `grid_search.py` reuses
 
 1. **Load the real item-master + demand data from Databricks**, if you're not
    already working from a local CSV/parquet. Ask the user which Databricks
-   CLI profile to use -- never default or guess it:
+   CLI profile to use -- never default or guess it.
+
+   **No real client catalog checked so far (`pourri_prod_sc`, `hasbro_prod_sc`)
+   actually has a pre-built `StandardSimulationRow`-shaped table** -- they
+   have `t_outbound_shipment`/`t_product`/`t_vendor_lead_time` separately,
+   and no `stockout_cost`/`ordering_cost` source at all (that's business
+   judgment, always ask -- see
+   `~/.claude/projects/-Users-jackrodenberg/memory/project_replenishment_cost_assumptions.md`
+   for the confirmed defaults). For that (the common case), use
+   `derive_standard_rows.py` instead: it pulls those three tables, derives
+   `holding_cost_per_unit`/`stockout_cost_per_unit` from real `unit_cost`
+   (`--holding-cost-percent`/`--stockout-cost-multiplier`, default 0.15/0.40),
+   takes `lead_time` from `t_vendor_lead_time.lead_time_days` (never a
+   guessed scalar), and builds `forecast` as a trailing moving average
+   (`--forecast-window`, default 3 periods -- `t_forecast`'s real p10/p50/p90
+   quantiles aren't wired in; confirm with the user this simplification is
+   still acceptable before relying on it for a real decision):
+   ```
+   python .claude/skills/optimize-replenishment-cost/scripts/derive_standard_rows.py \
+     --catalog hasbro_prod_sc --schema data_store --profile jack.rodenberg@daybreak.ai \
+     --out data.csv
+   ```
+   If a table genuinely is already `StandardSimulationRow`-shaped (see repo
+   root `CLAUDE.md`; only the synthetic sandbox table has been, so far), use
+   `load_from_databricks.py` directly instead:
    ```
    python .claude/skills/optimize-replenishment-cost/scripts/load_from_databricks.py \
      --table daybreakpoc_agent_playground.replenishment_sandbox.standard_simulation_rows \
      --profile jack.rodenberg@daybreak.ai --out data.csv
    ```
-   The table must already be `StandardSimulationRow`-shaped (see repo root
-   `CLAUDE.md`) plus whatever extra columns you'll point `--moq-field`/
+   plus whatever extra columns you'll point `--moq-field`/
    `--review-period-field`/`--lead-time-field` at in step 3 -- MOQ and review
-   period come from the data model, never a guessed scalar (see
-   `daybreakpoc_agent_playground.replenishment_sandbox.standard_simulation_rows`
-   for the reference shape: `moq`, `review_period`, `lead_time` columns).
-   `--where` narrows the query (e.g. `--where "site_id = 'US01'"`).
+   period come from the data model, never a guessed scalar. `--where`
+   narrows the query (e.g. `--where "site_id = 'US01'"`).
 2. **Get a strategy space** from the `propose-strategy-space` skill first if
    you don't have one yet -- `grid_search.py` validates it the same way that
    skill's own validator does, and will reject a hand-written one with the
